@@ -1,6 +1,8 @@
-# Phase 1: System Foundation
+# System Foundation
 
-Phase 1 establishes the runnable local foundation for Self-Healing Runtime:
+This document describes the local runtime foundation for Self-Healing Runtime.
+
+The foundation includes:
 
 - FastAPI control plane
 - Postgres schema for sandboxes, services, health checks, incidents, and timelines
@@ -48,16 +50,16 @@ GET  http://localhost:8001/items
 GET  http://localhost:8001/checkout
 ```
 
-## What To Verify
+## Verification
 
 1. `GET /health` on the control API should report the database check and target service health.
 2. `GET /sandboxes/local-docker` should show the Docker runtime descriptor, registered `target-api` service, and latest health check.
 3. `GET /health` on the target API should report the required environment variable and database dependency.
 4. The `health_checks` table should receive new rows from the background monitor.
 
-## Phase 1 Boundary
+## Current Scope
 
-This phase does not implement autonomous diagnosis or remediation yet. It creates the live substrate those later phases need:
+The current foundation does not implement autonomous diagnosis or remediation yet. It provides the live substrate required by those capabilities:
 
 - a control plane,
 - an observable target service,

@@ -4,15 +4,15 @@
 
 Self-Healing Runtime is a professional-grade autonomous incident response platform for live software systems. It monitors running applications inside isolated sandboxes, detects failures, gathers evidence, reasons about likely root causes, retrieves similar past incidents from memory, applies safe bounded fixes, verifies recovery, and stores the incident outcome for future use.
 
-This project is not a generic chatbot and it is not a collection of static alerting playbooks. The goal is to show a long-running agent behaving like a careful production incident responder.
+Self-Healing Runtime is not a generic chatbot and it is not a collection of static alerting playbooks. The system is designed around long-running agents that behave like careful production incident responders.
 
 ## One-Liner
 
 An autonomous runtime that watches live sandboxed apps, diagnoses failures with structured evidence, safely applies bounded remediations, verifies recovery, and remembers what worked.
 
-## What The Project Demonstrates
+## What The System Demonstrates
 
-The project should be understandable in a short demo, but deep enough to stand as a serious resume centerpiece:
+The system is designed to be understandable in a short demo while still reflecting production-grade architecture:
 
 1. A small target web service starts healthy.
 2. A realistic failure is injected, such as a broken database connection string.
@@ -37,11 +37,11 @@ The core moment: the service breaks live, the runtime investigates like an incid
 - Agent outputs should be typed objects: hypotheses, evidence, remediation candidates, risk scores, and verification results.
 - Incident memory should improve future responses.
 - The target app should fail in realistic ways.
-- The system should be built in phases, from a clear local prototype to a hardened production-style platform.
+- The system should evolve from a clear local runtime into a hardened production-style platform.
 
 ## Novel Technical Contributions
 
-This project is strongest when framed as more than “LLM watches logs and restarts services.” The novel part is the combination of agentic reasoning, constrained execution, memory, isolation, and observability.
+Self-Healing Runtime is more than “LLM watches logs and restarts services.” The novel part is the combination of agentic reasoning, constrained execution, memory, isolation, and observability.
 
 Key technical contributions:
 
@@ -184,13 +184,14 @@ self-healing-architecture/
   docs/
     architecture.md
     demo-script.md
+    system-foundation.md
     roadmap.md
     firecracker-notes.md
 ```
 
 ## Local Development
 
-Phase 1 can be run locally with Docker Compose:
+The local runtime can be started with Docker Compose:
 
 ```bash
 docker compose -f infra/docker-compose.yml up --build
@@ -215,7 +216,7 @@ GET  http://localhost:8001/health
 GET  http://localhost:8001/items
 ```
 
-See `docs/phase-1-system-foundation.md` for the Phase 1 runbook.
+See `docs/system-foundation.md` for the local foundation runbook.
 
 ## Core Services
 
@@ -250,7 +251,7 @@ GET    /events/stream
 
 ### Incident Agent
 
-The incident agent is a state machine, not an open-ended chatbot. It moves through explicit phases:
+The incident agent is a state machine, not an open-ended chatbot. It moves through explicit states:
 
 ```text
 detect_failure
@@ -683,13 +684,13 @@ Timeline event examples:
 08:01:36  Incident memory stored
 ```
 
-## Project Phases
+## Capability Roadmap
 
-This project should be developed as a serious systems project, not a short-lived demo. Each phase should leave behind something concrete: working code, documentation, tests, evaluation results, and a story that can be explained on a resume or in an interview.
+Self-Healing Runtime is organized as a set of platform capabilities. Each capability should be implemented with working code, documentation, tests, and observable behavior.
 
-### Phase 1: System Foundation
+### System Foundation
 
-Build the basic control plane and local runtime.
+Build the control plane and local runtime.
 
 Goals:
 
@@ -707,7 +708,7 @@ Key outputs:
 - `infra/docker-compose.yml`
 - Basic `/health`, `/sandboxes`, and `/incidents` APIs
 
-### Phase 2: Failure Modeling
+### Failure Modeling
 
 Create realistic, reproducible software failures.
 
@@ -748,7 +749,7 @@ Key output:
 }
 ```
 
-### Phase 3: Incident System And Timeline
+### Incident System And Timeline
 
 Turn failures into structured incidents.
 
@@ -774,9 +775,9 @@ failed
 blocked
 ```
 
-This phase makes the project auditable. A user should be able to inspect exactly what the runtime saw, what it decided, what it did, and whether the action worked.
+This capability makes the system auditable. A user should be able to inspect exactly what the runtime saw, what it decided, what it did, and whether the action worked.
 
-### Phase 4: Guarded Remediation Runtime
+### Guarded Remediation Runtime
 
 Build the safety layer that makes autonomous repair credible.
 
@@ -797,7 +798,7 @@ Agent -> typed remediation request -> policy/guardrail check -> executor -> veri
 
 The agent should never get direct shell access.
 
-### Phase 5: Agentic Diagnosis
+### Agentic Diagnosis
 
 Build the reasoning system as a state machine.
 
@@ -811,9 +812,9 @@ Goals:
 - Select an action based on confidence, risk, and policy.
 - Verify recovery after execution.
 
-The agent should produce structured outputs, not free-form chat responses. This is one of the most important parts of making the project feel professional.
+The agent should produce structured outputs, not free-form chat responses. This is central to making the system credible and auditable.
 
-### Phase 6: Incident Memory
+### Incident Memory
 
 Give the system long-term learning behavior.
 
@@ -834,7 +835,7 @@ Memory should not simply store logs. It should store compressed operational know
 - What verification proved recovery.
 - What should be avoided next time.
 
-### Phase 7: Observability Dashboard
+### Observability Dashboard
 
 Build a serious operator-facing UI.
 
@@ -851,7 +852,7 @@ Goals:
 
 The dashboard should not be a chatbot interface. It should feel like a compact incident command center.
 
-### Phase 8: MicroVM And Isolation Track
+### MicroVM And Isolation Track
 
 Move beyond Docker as the only sandbox story.
 
@@ -863,9 +864,9 @@ Goals:
 - Compare Docker vs MicroVM isolation tradeoffs.
 - Add sandbox lifecycle events.
 
-This phase is valuable because it turns the project from “agent demo” into a real systems architecture project.
+This capability moves the system beyond an agent demonstration and into a stronger runtime architecture.
 
-### Phase 9: Policy And Safety Engine
+### Policy And Safety Engine
 
 Make remediation governance explicit.
 
@@ -892,7 +893,7 @@ Example policy:
 }
 ```
 
-### Phase 10: Evaluation Framework
+### Evaluation Framework
 
 Prove the system works with repeatable experiments.
 
@@ -918,9 +919,9 @@ unsafe_action_block_rate
 memory_retrieval_hit_rate
 ```
 
-This phase makes the project much stronger for resumes because it shows engineering rigor, not just a flashy demo.
+This capability demonstrates engineering rigor by measuring behavior across repeatable failure conditions.
 
-### Phase 11: Production Hardening
+### Production Hardening
 
 Turn the system into something that looks and behaves like a real platform.
 
@@ -936,11 +937,11 @@ Goals:
 - Add CI checks.
 - Add deployment documentation.
 
-This phase makes the project feel complete and maintainable.
+This capability makes the system more complete, maintainable, and suitable for real operational environments.
 
-### Phase 12: Public Portfolio Package
+### Public Release Package
 
-Prepare the project for resume, GitHub, and interviews.
+Prepare the repository for public review, evaluation, and external contribution.
 
 Goals:
 
@@ -951,14 +952,14 @@ Goals:
 - Add evaluation results.
 - Add screenshots.
 - Add design tradeoff notes.
-- Add “what I would build next” documentation.
+- Add future architecture notes.
 
-The final portfolio story should be:
+The public positioning should be:
 
 ```text
-I built a self-healing runtime that combines sandboxed execution,
-agentic diagnosis, bounded remediation, incident memory, and
-observability to recover intentionally broken services.
+Self-Healing Runtime combines sandboxed execution, agentic diagnosis,
+bounded remediation, incident memory, and observability to recover
+intentionally broken services.
 ```
 
 ## Recommended First Demo Scenario
@@ -1003,7 +1004,7 @@ Demo flow:
 
 ## Success Criteria
 
-The project succeeds if a viewer can watch the system:
+The system succeeds if an operator can watch it:
 
 1. Detect a real failure.
 2. Explain the likely cause with structured evidence.
