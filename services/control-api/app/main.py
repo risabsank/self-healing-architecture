@@ -41,6 +41,6 @@ app.include_router(incidents_router)
 def root():
     return {
         "service": "self-healing-control-api",
-        "phase": "system-foundation",
+        "capability": "runtime-foundation",
         "docs": "/docs",
     }

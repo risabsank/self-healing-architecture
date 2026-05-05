@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DockerRuntime:
-    """Phase 1 runtime descriptor for the local Docker Compose sandbox."""
+    """Runtime descriptor for the local Docker Compose sandbox."""
 
     sandbox_id: str = "local-docker"
     runtime: str = "docker-compose"
@@ -13,5 +13,5 @@ class DockerRuntime:
             "sandbox_id": self.sandbox_id,
             "runtime": self.runtime,
             "isolation": "docker-containers",
-            "phase": "system-foundation",
+            "capability": "runtime-foundation",
         }

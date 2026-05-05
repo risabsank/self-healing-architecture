@@ -2,17 +2,17 @@
 
 ## Reasoning + Memory for Live Software Failures
 
-Self-Healing Runtime is a professional-grade autonomous incident response platform for live software systems. It monitors running applications inside isolated sandboxes, detects failures, gathers evidence, reasons about likely root causes, retrieves similar past incidents from memory, applies safe bounded fixes, verifies recovery, and stores the incident outcome for future use.
+Self-Healing Runtime is a professional-grade autonomous incident response and software repair platform for live software systems. It monitors running applications inside isolated sandboxes, detects failures, gathers evidence, reasons about likely root causes, retrieves similar past incidents from memory, applies safe bounded mitigations, verifies recovery, and can generate validated code changes that make the system more resilient over time.
 
 Self-Healing Runtime is not a generic chatbot and it is not a collection of static alerting playbooks. The system is designed around long-running agents that behave like careful production incident responders.
 
 ## One-Liner
 
-An autonomous runtime that watches live sandboxed apps, diagnoses failures with structured evidence, safely applies bounded remediations, verifies recovery, and remembers what worked.
+An autonomous runtime that watches live sandboxed apps, diagnoses failures with structured evidence, safely mitigates incidents, validates code-level repairs through CI/CD, rolls them out through canaries, and remembers what worked.
 
-## What The System Demonstrates
+## System Capabilities
 
-The system is designed to be understandable in a short demo while still reflecting production-grade architecture:
+The system is designed to be easy to understand while still reflecting production-grade architecture:
 
 1. A small target web service starts healthy.
 2. A realistic failure is injected, such as a broken database connection string.
@@ -20,22 +20,28 @@ The system is designed to be understandable in a short demo while still reflecti
 4. An incident session starts automatically.
 5. The agent collects evidence and retrieves similar past incidents.
 6. The agent generates typed hypotheses and ranks likely root causes.
-7. The agent selects a safe remediation action from an allowlisted interface.
-8. The remediation is applied inside the sandbox.
-9. The runtime verifies recovery.
-10. The incident summary, evidence, action, and result are stored in memory.
-11. The dashboard displays a replayable incident timeline.
+7. The agent selects a safe mitigation action from an allowlisted interface.
+8. The mitigation is applied inside the sandbox to restore service quickly.
+9. When the failure indicates a durable defect, a repair agent proposes a code or configuration change.
+10. The change is validated through tests, static checks, and sandbox verification.
+11. A canary deployment receives limited traffic while health and regression signals are monitored.
+12. The runtime promotes, rolls back, or quarantines the change based on verification results.
+13. The incident summary, evidence, action, code change, rollout result, and outcome are stored in memory.
+14. The dashboard displays a replayable incident and release timeline.
 
-The core moment: the service breaks live, the runtime investigates like an incident responder, applies a constrained fix, verifies recovery, and leaves behind a complete audit trail.
+The core moment: the service breaks live, the runtime investigates like an incident responder, restores service with a constrained mitigation, proposes a durable fix, validates it through a deployment pipeline, canaries it safely, and leaves behind a complete audit trail.
 
 ## Design Principles
 
 - The agent must not blindly run shell commands.
-- Every remediation must go through a bounded action interface.
+- Every runtime mitigation must go through a bounded action interface.
+- Every code change must go through a bounded patch-generation, test, review, and rollout interface.
 - Dangerous actions must require human approval or be blocked.
+- Autonomous decisions are allowed only when the system has sufficient evidence, low operational risk, passing verification, and rollback coverage.
 - The system should log structured reasoning summaries, not hidden chain-of-thought.
-- Agent outputs should be typed objects: hypotheses, evidence, remediation candidates, risk scores, and verification results.
+- Agent outputs should be typed objects: hypotheses, evidence, mitigation candidates, patch plans, risk scores, verification results, and rollout decisions.
 - Incident memory should improve future responses.
+- Successful repairs should become regression tests, policy signals, and reusable operational memory.
 - The target app should fail in realistic ways.
 - The system should evolve from a clear local runtime into a hardened production-style platform.
 
@@ -45,11 +51,13 @@ Self-Healing Runtime is more than “LLM watches logs and restarts services.” 
 
 Key technical contributions:
 
-- **Typed incident reasoning:** the agent emits structured evidence, hypotheses, risk scores, remediation candidates, and verification results instead of chat messages.
-- **Bounded autonomous repair:** the system can act, but only through a safe remediation interface with explicit policy checks.
+- **Typed incident reasoning:** the agent emits structured evidence, hypotheses, risk scores, mitigation candidates, patch plans, rollout decisions, and verification results instead of chat messages.
+- **Bounded autonomous repair:** the system can act, but only through safe runtime, patch, CI/CD, and rollout interfaces with explicit policy checks.
+- **Self-improvement loop:** incidents can produce durable code, configuration, or test changes that are validated before release.
+- **Canary-first deployment:** generated changes are released to an isolated canary target and promoted only after automated health and regression checks pass.
 - **Incident memory loop:** every resolved incident becomes retrievable operational knowledge for future diagnosis.
 - **Sandboxed failure environments:** failures happen in live isolated runtimes, not static examples.
-- **Replayable operational traces:** every step of detection, reasoning, action, and verification is stored as a timeline.
+- **Replayable operational traces:** every step of detection, reasoning, mitigation, patch generation, CI validation, rollout, and verification is stored as a timeline.
 - **Evaluation harness:** the system can be tested against repeatable failure scenarios and measured with recovery metrics.
 - **Runtime abstraction:** Docker is the first backend, but the architecture can evolve toward Firecracker/MicroVM isolation.
 
@@ -83,18 +91,34 @@ Key technical contributions:
 │ LangGraph state machine  │
 └──────┬──────────┬────────┘
        │          │
-       │          └────────────────┐
-       │                           │
+       │          ├────────────────┐
+       │          │                │
+       │          ▼                ▼
+┌──────▼──────────┐       ┌───────────────┐
+│ Repair Agent    │       │ Vector Memory │
+│ patch planning  │       │ pgvector      │
+└──────┬──────────┘       └───────────────┘
+       │
+┌──────▼──────────┐
+│ CI/CD Verifier  │
+│ tests + scans   │
+└──────┬──────────┘
+       │
+┌──────▼──────────┐
+│ Canary Rollout  │
+│ promote/rollback│
+└──────┬──────────┘
+       │
 ┌──────▼──────────┐       ┌────────▼─────────┐
-│ Postgres        │       │ Vector Memory    │
-│ incidents/events│       │ pgvector/Chroma  │
+│ Postgres        │       │ Policy Engine    │
+│ events/releases │       │ approvals/risk   │
 └──────┬──────────┘       └──────────────────┘
        │
 ┌──────▼──────────┐
 │ Sandbox Runtime │
 │ Docker first    │
 └──────┬──────────┘
-       │ bounded actions only
+       │ bounded runtime actions only
 ┌──────▼──────────────────┐
 │ Breakable Target App    │
 │ API + database service  │
@@ -110,11 +134,16 @@ Key technical contributions:
 5. Generate hypotheses.
 6. Retrieve similar incidents from memory.
 7. Rank possible root causes.
-8. Select a safe remediation action.
-9. Apply the fix inside the sandbox through the controlled executor.
-10. Verify recovery.
-11. Store incident summary, evidence, action, and outcome in memory.
-12. Show the full timeline in the UI.
+8. Select a safe runtime mitigation.
+9. Apply the mitigation inside the sandbox through the controlled executor.
+10. Verify service recovery.
+11. Decide whether the failure requires a durable repair.
+12. Generate a bounded code, test, or configuration patch.
+13. Run CI checks, regression tests, static analysis, and sandbox verification.
+14. Deploy the change to a canary target.
+15. Promote, roll back, or quarantine the change based on rollout signals.
+16. Store incident summary, evidence, mitigation, patch, rollout, and outcome in memory.
+17. Show the full incident and release timeline in the UI.
 
 ## Repository Structure
 
@@ -137,12 +166,22 @@ self-healing-architecture/
             incidents.py
             sandboxes.py
             actions.py
+            releases.py
             timeline.py
         agents/
           graph.py
           prompts.py
+          repair_graph.py
           state.py
           tools.py
+        cicd/
+          verifier.py
+          test_runner.py
+          rollout.py
+        codegen/
+          patch_planner.py
+          patch_writer.py
+          regression_writer.py
         core/
           config.py
           db.py
@@ -157,6 +196,9 @@ self-healing-architecture/
         observability/
           event_log.py
           schemas.py
+        policy/
+          engine.py
+          rules.py
         sandbox/
           action_executor.py
           allowed_actions.py
@@ -183,7 +225,7 @@ self-healing-architecture/
 
   docs/
     architecture.md
-    demo-script.md
+    walkthrough.md
     system-foundation.md
     roadmap.md
     firecracker-notes.md
@@ -222,7 +264,7 @@ See `docs/system-foundation.md` for the local foundation runbook.
 
 ### Control API
 
-The FastAPI control service owns the incident lifecycle. It exposes APIs for sandboxes, incidents, timelines, memory, and remediation approval.
+The FastAPI control service owns the incident lifecycle. It exposes APIs for sandboxes, incidents, timelines, memory, mitigation approval, and release approval.
 
 Example routes:
 
@@ -243,6 +285,12 @@ GET    /incidents/{incident_id}/actions
 POST   /actions/{action_id}/approve
 POST   /actions/{action_id}/reject
 
+GET    /releases
+GET    /releases/{release_id}
+GET    /releases/{release_id}/checks
+POST   /releases/{release_id}/approve
+POST   /releases/{release_id}/rollback
+
 GET    /memory/search?query=...
 POST   /memory/reindex
 
@@ -260,13 +308,47 @@ detect_failure
   -> retrieve_memory
   -> generate_hypotheses
   -> rank_root_causes
-  -> propose_remediations
+  -> propose_mitigations
   -> guardrail_check
   -> apply_action OR require_approval OR block
   -> verify_recovery
+  -> decide_durable_repair
+  -> plan_patch OR skip_patch
+  -> generate_patch
+  -> run_ci_verification
+  -> deploy_canary
+  -> promote OR rollback OR quarantine
   -> store_memory
   -> close_incident
 ```
+
+### Repair Agent
+
+The repair agent handles durable improvements after immediate service recovery. It does not freely edit arbitrary files. It receives a bounded repair request with an incident summary, evidence, affected component, allowed write paths, test commands, rollback strategy, and deployment policy.
+
+Repair requests should produce typed objects:
+
+```json
+{
+  "repair_type": "code_patch",
+  "affected_component": "target-api",
+  "allowed_paths": [
+    "target-app/api/main.py",
+    "target-app/api/tests/"
+  ],
+  "patch_summary": "Add defensive database connection handling and regression coverage for unavailable database hosts.",
+  "risk_score": 0.34,
+  "requires_approval": false,
+  "verification_plan": [
+    "unit tests",
+    "integration health check",
+    "sandbox replay of bad_database_url"
+  ],
+  "rollback_plan": "Restore previous image and route traffic away from canary."
+}
+```
+
+The repair agent can propose and apply patches only through the code repair interface. The CI/CD verifier decides whether a generated change is eligible for canary rollout.
 
 ### Sandbox Runtime
 
@@ -276,11 +358,11 @@ The architecture should leave room for a future Firecracker or MicroVM backend:
 
 - Docker runtime for local development and fast iteration.
 - Runtime interface that can later support MicroVM creation, snapshotting, and teardown.
-- Same bounded remediation API regardless of sandbox implementation.
+- Same bounded runtime mitigation API regardless of sandbox implementation.
 
-### Bounded Remediation Executor
+### Bounded Mitigation Executor
 
-The agent never receives raw shell access. It can only request typed remediation operations from an allowlist.
+The agent never receives raw shell access. It can only request typed runtime mitigation operations from an allowlist.
 
 Example allowed actions:
 
@@ -296,6 +378,22 @@ class AllowedAction(str, Enum):
     SCALE_REPLICA = "scale_replica"
     SWITCH_DEPENDENCY_TO_MOCK = "switch_dependency_to_mock"
 ```
+
+Code and release operations are separate from runtime mitigation actions:
+
+```python
+class AllowedRepairAction(str, Enum):
+    CREATE_PATCH_BRANCH = "create_patch_branch"
+    APPLY_BOUNDED_PATCH = "apply_bounded_patch"
+    ADD_REGRESSION_TEST = "add_regression_test"
+    RUN_TEST_SUITE = "run_test_suite"
+    BUILD_ARTIFACT = "build_artifact"
+    DEPLOY_CANARY = "deploy_canary"
+    PROMOTE_CANARY = "promote_canary"
+    ROLLBACK_CANARY = "rollback_canary"
+```
+
+Repair actions are constrained by repository path allowlists, test requirements, policy decisions, and rollback plans. A runtime incident may be mitigated autonomously while a durable code repair continues through the validation and canary path.
 
 Safe action example:
 
@@ -322,6 +420,155 @@ Blocked action example:
   },
   "decision": "blocked",
   "reason": "Action type is not allowlisted"
+}
+```
+
+## Self-Improvement Workflow
+
+The runtime separates immediate recovery from durable improvement.
+
+Immediate recovery focuses on reducing downtime:
+
+```text
+detect incident
+-> collect evidence
+-> apply low-risk mitigation
+-> verify service recovery
+```
+
+Durable improvement focuses on making the system stronger:
+
+```text
+classify durable defect
+-> create bounded repair plan
+-> generate code/config/test patch
+-> run CI/CD verification
+-> deploy to canary
+-> monitor canary health
+-> promote, roll back, or quarantine
+-> store repair memory
+```
+
+The system should prefer reversible runtime mitigations first. Code changes are generated only when the incident evidence suggests a durable defect, missing guardrail, missing regression test, or configuration weakness.
+
+## CI/CD Verification
+
+Generated changes must pass an automated verification pipeline before they can receive canary traffic.
+
+Recommended checks:
+
+- Unit tests for the modified component.
+- Integration tests against dependent services.
+- Regression test that reproduces the original incident.
+- Static analysis and formatting checks.
+- Dependency and security checks.
+- Sandbox replay of the failure scenario.
+- Health checks against the patched service.
+- Rollback plan validation.
+
+Verification output should be structured:
+
+```json
+{
+  "repair_change_id": "change-123",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "unit_tests",
+      "status": "passed",
+      "duration_ms": 1840
+    },
+    {
+      "name": "sandbox_replay_bad_database_url",
+      "status": "passed",
+      "duration_ms": 9100
+    },
+    {
+      "name": "rollback_plan",
+      "status": "passed",
+      "duration_ms": 650
+    }
+  ]
+}
+```
+
+## Canary Rollout
+
+The canary system releases generated changes gradually. A change should never be promoted only because tests passed. It must also prove itself under live health signals.
+
+Canary policy:
+
+- Deploy patched artifact to a canary sandbox or canary service instance.
+- Route a small percentage of traffic or synthetic probes to the canary.
+- Compare canary health against baseline health.
+- Monitor error rate, latency, crash loops, dependency failures, and regression checks.
+- Promote only if all required health windows pass.
+- Roll back automatically if guardrail thresholds are breached.
+- Quarantine the change if the signal is inconclusive.
+
+Example rollout decision:
+
+```json
+{
+  "release_id": "release-123",
+  "status": "promoted",
+  "traffic_percentage": 10,
+  "decision": "promote",
+  "health_signals": {
+    "error_rate": 0.0,
+    "p95_latency_ms": 42,
+    "healthcheck_success_rate": 1.0,
+    "regression_failures": 0
+  }
+}
+```
+
+## Autonomy Model
+
+The system should make many operational decisions autonomously, but autonomy must be scoped by policy, evidence, and reversibility.
+
+Autonomous by default:
+
+- Collecting logs, metrics, health checks, config snapshots, and recent-change metadata.
+- Creating incident records and timeline events.
+- Retrieving similar incidents from memory.
+- Generating hypotheses and ranking root causes.
+- Applying low-risk reversible mitigations.
+- Creating low-risk patch plans within approved paths.
+- Running tests, sandbox replay, and static checks.
+- Rolling back a failing canary.
+
+Approval-gated:
+
+- Database migrations.
+- Dependency upgrades.
+- Security-sensitive code paths.
+- Irreversible data changes.
+- Broad refactors.
+- Changes without a reliable rollback plan.
+- Canary promotion when health signals are incomplete.
+
+Blocked:
+
+- Arbitrary shell execution.
+- Unbounded filesystem writes.
+- Secret exfiltration.
+- Destructive data operations without explicit policy.
+- Promotion after failed verification.
+
+Autonomous decisions should be recorded as structured policy decisions:
+
+```json
+{
+  "decision": "allow_autonomous_canary",
+  "risk_score": 0.28,
+  "evidence": [
+    "patch limited to approved paths",
+    "regression test reproduces incident",
+    "CI verification passed",
+    "rollback plan available"
+  ],
+  "blocked_reasons": []
 }
 ```
 
@@ -377,6 +624,47 @@ CREATE TABLE remediation_actions (
   result JSONB
 );
 
+CREATE TABLE repair_changes (
+  id UUID PRIMARY KEY,
+  incident_id UUID REFERENCES incidents(id),
+  status TEXT NOT NULL,
+  change_type TEXT NOT NULL,
+  branch_name TEXT,
+  commit_sha TEXT,
+  affected_paths TEXT[] NOT NULL,
+  patch_summary TEXT NOT NULL,
+  risk_score FLOAT NOT NULL,
+  requires_approval BOOLEAN NOT NULL,
+  verification_plan JSONB NOT NULL,
+  rollback_plan TEXT NOT NULL,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE verification_runs (
+  id UUID PRIMARY KEY,
+  repair_change_id UUID REFERENCES repair_changes(id),
+  status TEXT NOT NULL,
+  runner TEXT NOT NULL,
+  checks JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  logs_ref TEXT
+);
+
+CREATE TABLE canary_rollouts (
+  id UUID PRIMARY KEY,
+  repair_change_id UUID REFERENCES repair_changes(id),
+  status TEXT NOT NULL,
+  target_environment TEXT NOT NULL,
+  traffic_percentage FLOAT NOT NULL,
+  health_signals JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  decision TEXT
+);
+
 CREATE TABLE incident_memories (
   id UUID PRIMARY KEY,
   incident_id UUID REFERENCES incidents(id),
@@ -384,6 +672,8 @@ CREATE TABLE incident_memories (
   root_cause TEXT,
   successful_action JSONB,
   failed_actions JSONB,
+  repair_change JSONB,
+  rollout_result JSONB,
   embedding vector(1536),
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -423,6 +713,27 @@ class RemediationCandidate(BaseModel):
     risk_score: float
     requires_approval: bool
 
+class RepairPlan(BaseModel):
+    repair_type: Literal["code_patch", "config_patch", "test_only", "no_durable_change"]
+    affected_component: str
+    allowed_paths: list[str]
+    patch_summary: str
+    risk_score: float
+    requires_approval: bool
+    verification_plan: list[str]
+    rollback_plan: str
+
+class VerificationRun(BaseModel):
+    status: Literal["pending", "running", "passed", "failed", "blocked"]
+    checks: list[dict]
+    logs_ref: str | None = None
+
+class CanaryRollout(BaseModel):
+    status: Literal["pending", "running", "promoted", "rolled_back", "quarantined"]
+    traffic_percentage: float
+    health_signals: list[dict]
+    decision_summary: str | None = None
+
 class VerificationResult(BaseModel):
     recovered: bool
     checks: list[dict]
@@ -437,6 +748,9 @@ class IncidentState(TypedDict):
     hypotheses: list[Hypothesis]
     candidates: list[RemediationCandidate]
     selected_action: RemediationCandidate | None
+    repair_plan: RepairPlan | None
+    ci_verification: VerificationRun | None
+    canary_rollout: CanaryRollout | None
     verification: VerificationResult | None
 ```
 
@@ -464,6 +778,9 @@ def monitor_loop(sandbox_id: str):
                 "hypotheses": [],
                 "candidates": [],
                 "selected_action": None,
+                "repair_plan": None,
+                "ci_verification": None,
+                "canary_rollout": None,
                 "verification": None,
             }
 
@@ -495,6 +812,29 @@ Example event:
 }
 ```
 
+Example repair event:
+
+```json
+{
+  "type": "repair.plan.created",
+  "actor": "repair-agent",
+  "payload": {
+    "repair_type": "code_patch",
+    "affected_component": "target-api",
+    "patch_summary": "Add regression coverage and defensive handling for database connectivity failures.",
+    "risk_score": 0.34,
+    "verification_plan": [
+      "unit tests",
+      "integration tests",
+      "sandbox replay",
+      "canary health checks"
+    ],
+    "autonomy_decision": "eligible_for_autonomous_canary",
+    "rationale_summary": "The change is limited to the target API, has a rollback path, and is covered by regression tests that reproduce the incident."
+  }
+}
+```
+
 ## Failure Scenarios
 
 ### 1. Wrong Database Connection String
@@ -507,13 +847,17 @@ Symptoms:
 - Logs contain database connection errors.
 - App process may remain alive, but routes requiring persistence fail.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Restore `DATABASE_URL` from known-good config.
 - Restart the target API.
 - Verify `/health` and a database-backed endpoint.
 
-This should be the primary demo scenario.
+Potential durable improvement:
+
+- Add clearer startup validation for database configuration.
+- Add regression coverage for bad database hosts.
+- Improve health-check error classification.
 
 ### 2. Bad Feature Flag
 
@@ -525,10 +869,15 @@ Symptoms:
 - Logs reference a feature-specific error.
 - Recent change metadata shows a flag update.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Disable the feature flag.
 - Verify the affected endpoint.
+
+Potential durable improvement:
+
+- Add contract tests for the flagged path.
+- Add feature-flag rollout checks before enabling by default.
 
 ### 3. Schema Mismatch After Deploy
 
@@ -540,10 +889,15 @@ Symptoms:
 - Health may be partially degraded.
 - Recent deploy metadata indicates a new app version.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Low risk: roll back the app version.
 - Medium risk: run a known migration with human approval.
+
+Potential durable improvement:
+
+- Add migration compatibility checks to CI.
+- Add deploy gate that verifies app/schema compatibility.
 
 ### 4. API Dependency Unavailable
 
@@ -554,10 +908,15 @@ Symptoms:
 - Timeouts or connection errors.
 - Affected routes fail while core app health may remain healthy.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Switch to fallback mock dependency.
 - Restart or reconfigure the dependent service.
+
+Potential durable improvement:
+
+- Add circuit breaker behavior.
+- Add dependency timeout and fallback tests.
 
 ### 5. Port Conflict
 
@@ -568,10 +927,15 @@ Symptoms:
 - Process crash loop.
 - Logs include address already in use.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Restart conflicting service.
 - Restore expected port config.
+
+Potential durable improvement:
+
+- Add preflight port checks.
+- Add clearer startup diagnostics.
 
 ### 6. Memory Leak Or Crash Loop
 
@@ -583,10 +947,15 @@ Symptoms:
 - Increasing memory metrics.
 - Repeated crash signatures in logs.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Restart service as temporary recovery.
 - Roll back recent deploy if crash began after deployment.
+
+Potential durable improvement:
+
+- Add leak reproduction tests or stress checks.
+- Add memory budget alerting and rollback gates.
 
 ### 7. Rate Limit Induced Failure
 
@@ -597,14 +966,19 @@ Symptoms:
 - HTTP `429` from dependency.
 - Retry storm in logs.
 
-Likely remediation:
+Likely runtime mitigation:
 
 - Enable backoff flag.
 - Switch to cached or mocked dependency.
 
+Potential durable improvement:
+
+- Add exponential backoff behavior.
+- Add dependency rate-limit simulation to tests.
+
 ## Memory Design
 
-Memory should answer: “Have we seen something like this before, and what worked?”
+Memory should answer: “Have we seen something like this before, what restored service, what durable repair worked, and what should be tested next time?”
 
 Incident memory example:
 
@@ -624,11 +998,18 @@ Incident memory example:
       "value_source": "known_good_config"
     }
   },
+  "repair_change": {
+    "type": "code_patch",
+    "summary": "Added database configuration validation and regression coverage for unreachable database hosts.",
+    "verification": "ci_passed",
+    "rollout": "canary_promoted"
+  },
   "verification": {
     "recovered": true,
     "checks": [
       "GET /health returned 200",
-      "GET /items returned 200"
+      "GET /items returned 200",
+      "bad_database_url regression test passed"
     ]
   }
 }
@@ -638,7 +1019,7 @@ Operational fact memory example:
 
 ```json
 {
-  "sandbox_id": "demo-001",
+  "sandbox_id": "local-docker",
   "service": "target-api",
   "known_good_config": {
     "DATABASE_URL": "postgresql://app:app@target-db:5432/app"
@@ -663,7 +1044,10 @@ Primary views:
 - Evidence panel
 - Hypotheses and confidence scores
 - Memory matches
-- Selected remediation action
+- Selected runtime mitigation
+- Generated repair plan
+- CI/CD verification results
+- Canary rollout status
 - Guardrail decision
 - Verification result
 - Past incident replay
@@ -677,11 +1061,16 @@ Timeline event examples:
 08:01:16  Config inspected
 08:01:18  Similar incident found
 08:01:21  Hypothesis ranked: bad DATABASE_URL
-08:01:23  Remediation selected: restore env var
+08:01:23  Runtime mitigation selected: restore env var
 08:01:25  Guardrail approved low-risk action
 08:01:30  Service restarted
 08:01:35  Verification passed
-08:01:36  Incident memory stored
+08:01:36  Durable repair needed: yes
+08:01:45  Patch generated with regression test
+08:02:10  CI verification passed
+08:02:35  Canary deployed at 10 percent
+08:03:35  Canary promoted
+08:03:36  Incident and repair memory stored
 ```
 
 ## Capability Roadmap
@@ -742,7 +1131,7 @@ Key output:
     "logs contain connection refused"
   ],
   "likely_root_cause": "bad database connection string",
-  "safe_remediations": [
+  "safe_mitigations": [
     "SET_ENV_VAR",
     "RESTART_SERVICE"
   ]
@@ -777,14 +1166,14 @@ blocked
 
 This capability makes the system auditable. A user should be able to inspect exactly what the runtime saw, what it decided, what it did, and whether the action worked.
 
-### Guarded Remediation Runtime
+### Guarded Mitigation Runtime
 
 Build the safety layer that makes autonomous repair credible.
 
 Goals:
 
 - Implement the bounded action executor.
-- Add allowlisted remediation actions.
+- Add allowlisted mitigation actions.
 - Add risk scoring.
 - Add approval gates.
 - Block unknown or dangerous actions.
@@ -793,10 +1182,55 @@ Goals:
 The important architectural rule:
 
 ```text
-Agent -> typed remediation request -> policy/guardrail check -> executor -> verification
+Agent -> typed mitigation request -> policy/guardrail check -> executor -> verification
 ```
 
 The agent should never get direct shell access.
+
+### Durable Code Repair
+
+Generate bounded source, configuration, and regression-test changes when incident evidence indicates a durable defect.
+
+Goals:
+
+- Add a repair agent with path-scoped write permissions.
+- Convert incident evidence into a structured repair plan.
+- Generate patches only within approved repository paths.
+- Add or update regression tests that reproduce the incident.
+- Attach a rollback plan to every generated change.
+- Record patch summaries, affected paths, risk scores, and verification results.
+
+Autonomous patch generation should be allowed only for low-risk, well-scoped changes. Larger changes, migrations, dependency upgrades, and security-sensitive edits should require approval.
+
+### CI/CD Verification
+
+Validate generated changes before they can affect live traffic.
+
+Goals:
+
+- Run unit, integration, and regression tests.
+- Replay the original failure scenario against the patched artifact.
+- Run formatting, static analysis, and security checks.
+- Build deployable artifacts.
+- Store structured verification results.
+- Block canary rollout when verification fails.
+
+This capability gives the system a way to improve itself without relying on trust in the agent alone.
+
+### Canary Release Management
+
+Release generated changes gradually with automated rollback.
+
+Goals:
+
+- Deploy patched artifacts to canary environments.
+- Route synthetic probes or limited traffic to canaries.
+- Compare canary health against baseline health.
+- Promote changes only after required health windows pass.
+- Roll back automatically when error, latency, or availability thresholds are breached.
+- Quarantine uncertain releases for review.
+
+Canary rollout is the bridge between autonomous repair and operational safety.
 
 ### Agentic Diagnosis
 
@@ -808,7 +1242,7 @@ Goals:
 - Collect evidence from health checks, logs, config, service state, recent changes, and memory.
 - Generate typed hypotheses.
 - Rank root causes.
-- Propose remediation candidates.
+- Propose mitigation candidates.
 - Select an action based on confidence, risk, and policy.
 - Verify recovery after execution.
 
@@ -823,7 +1257,7 @@ Goals:
 - Store resolved incident summaries.
 - Embed incident symptoms, root causes, and outcomes.
 - Retrieve similar incidents during diagnosis.
-- Track which remediations succeeded or failed.
+- Track which mitigations succeeded or failed.
 - Use memory to improve ranking and action selection.
 
 Memory should not simply store logs. It should store compressed operational knowledge:
@@ -864,11 +1298,11 @@ Goals:
 - Compare Docker vs MicroVM isolation tradeoffs.
 - Add sandbox lifecycle events.
 
-This capability moves the system beyond an agent demonstration and into a stronger runtime architecture.
+This capability moves the system beyond isolated agent behavior and into a stronger runtime architecture.
 
 ### Policy And Safety Engine
 
-Make remediation governance explicit.
+Make mitigation and repair governance explicit.
 
 Goals:
 
@@ -919,7 +1353,7 @@ unsafe_action_block_rate
 memory_retrieval_hit_rate
 ```
 
-This capability demonstrates engineering rigor by measuring behavior across repeatable failure conditions.
+This capability shows engineering rigor by measuring behavior across repeatable failure conditions.
 
 ### Production Hardening
 
@@ -947,7 +1381,7 @@ Goals:
 
 - Write a strong README.
 - Add architecture diagrams.
-- Add a short demo video.
+- Add a short technical walkthrough.
 - Add a technical blog post.
 - Add evaluation results.
 - Add screenshots.
@@ -958,35 +1392,23 @@ The public positioning should be:
 
 ```text
 Self-Healing Runtime combines sandboxed execution, agentic diagnosis,
-bounded remediation, incident memory, and observability to recover
-intentionally broken services.
+bounded mitigation, durable repair, canary rollout, incident memory,
+and observability to recover and improve intentionally broken services.
 ```
 
-## Recommended First Demo Scenario
+## Example Recovery Scenario
 
-Use the broken `DATABASE_URL` scenario first.
+The broken `DATABASE_URL` scenario is a useful first end-to-end scenario.
 
 Why this scenario works well:
 
 - It is easy for viewers to understand.
 - The failure is realistic.
 - Evidence is clear in logs and config.
-- The remediation is safe and bounded.
-- Verification is straightforward.
-- Re-running the failure can demonstrate memory improving response.
-
-Demo flow:
-
-1. Show healthy app.
-2. Trigger `bad_db_url`.
-3. Watch the health indicator fail.
-4. Show the agent collecting logs, config, and memory.
-5. Show the top hypothesis: broken database connection string.
-6. Show selected remediation: restore known-good `DATABASE_URL` and restart service.
-7. Show guardrail approval because the action is low risk.
-8. Show verification passing.
-9. Show incident memory stored.
-10. Trigger the same issue again and show faster diagnosis using memory.
+- The mitigation is safe and bounded.
+- Verification can include health checks, database-backed endpoints, and regression tests.
+- The durable improvement path can add configuration validation, clearer diagnostics, and test coverage.
+- Re-running the failure can show memory-assisted diagnosis and stronger preventive behavior.
 
 ## Advanced Extensions
 
@@ -1008,9 +1430,12 @@ The system succeeds if an operator can watch it:
 
 1. Detect a real failure.
 2. Explain the likely cause with structured evidence.
-3. Choose a safe bounded remediation.
-4. Apply the fix without arbitrary shell access.
+3. Choose a safe bounded mitigation.
+4. Apply the mitigation without arbitrary shell access.
 5. Verify recovery.
-6. Remember the incident for future diagnosis.
+6. Generate a durable repair when the failure indicates a code or configuration defect.
+7. Validate the repair through CI/CD checks and sandbox replay.
+8. Release the repair through canary rollout with automatic rollback.
+9. Remember the incident, mitigation, repair, rollout, and outcome for future diagnosis.
 
 That end-to-end loop is the core product.

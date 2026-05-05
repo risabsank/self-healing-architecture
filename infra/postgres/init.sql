@@ -83,6 +83,47 @@ CREATE TABLE IF NOT EXISTS remediation_actions (
   result JSONB
 );
 
+CREATE TABLE IF NOT EXISTS repair_changes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id UUID REFERENCES incidents(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  change_type TEXT NOT NULL,
+  branch_name TEXT,
+  commit_sha TEXT,
+  affected_paths TEXT[] NOT NULL DEFAULT '{}',
+  patch_summary TEXT NOT NULL,
+  risk_score FLOAT NOT NULL,
+  requires_approval BOOLEAN NOT NULL,
+  verification_plan JSONB NOT NULL DEFAULT '[]'::jsonb,
+  rollback_plan TEXT NOT NULL,
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS verification_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repair_change_id UUID REFERENCES repair_changes(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  runner TEXT NOT NULL,
+  checks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  logs_ref TEXT
+);
+
+CREATE TABLE IF NOT EXISTS canary_rollouts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  repair_change_id UUID REFERENCES repair_changes(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  target_environment TEXT NOT NULL,
+  traffic_percentage FLOAT NOT NULL,
+  health_signals JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  decision TEXT
+);
+
 CREATE TABLE IF NOT EXISTS incident_memories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
@@ -90,9 +131,15 @@ CREATE TABLE IF NOT EXISTS incident_memories (
   root_cause TEXT,
   successful_action JSONB,
   failed_actions JSONB,
+  repair_change JSONB,
+  rollout_result JSONB,
   embedding vector(1536),
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE incident_memories
+  ADD COLUMN IF NOT EXISTS repair_change JSONB,
+  ADD COLUMN IF NOT EXISTS rollout_result JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
   ON health_checks (sandbox_id, checked_at DESC);
@@ -103,13 +150,19 @@ CREATE INDEX IF NOT EXISTS idx_incidents_sandbox_status
 CREATE INDEX IF NOT EXISTS idx_incident_events_incident_ts
   ON incident_events (incident_id, ts);
 
+CREATE INDEX IF NOT EXISTS idx_repair_changes_incident_status
+  ON repair_changes (incident_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_canary_rollouts_repair_status
+  ON canary_rollouts (repair_change_id, status);
+
 INSERT INTO sandboxes (id, name, runtime, status, metadata)
 VALUES (
   'local-docker',
   'Local Docker Sandbox',
   'docker-compose',
   'active',
-  '{"description": "Phase 1 local sandbox running the intentionally breakable target API."}'::jsonb
+  '{"description": "Local sandbox running the intentionally breakable target API."}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE
 SET updated_at = now(),

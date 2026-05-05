@@ -40,7 +40,7 @@ services:
       APP_NAME: breakable-target-api
       DATABASE_URL: postgresql://target_app:target_app@target-db:5432/target_app
       REQUIRED_ENV_NAME: TARGET_REQUIRED_SECRET
-      TARGET_REQUIRED_SECRET: phase-one-secret
+      TARGET_REQUIRED_SECRET: runtime-foundation-secret
       FEATURE_CHECKOUT_ENABLED: "true"
     ports:
       - "8001:8001"

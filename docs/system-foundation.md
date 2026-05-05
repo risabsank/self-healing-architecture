@@ -5,7 +5,7 @@ This document describes the local runtime foundation for Self-Healing Runtime.
 The foundation includes:
 
 - FastAPI control plane
-- Postgres schema for sandboxes, services, health checks, incidents, and timelines
+- Postgres schema for sandboxes, services, health checks, incidents, timelines, and future repair records
 - Docker Compose runtime
 - Intentionally breakable target app
 - Basic health monitoring loop
@@ -59,10 +59,13 @@ GET  http://localhost:8001/checkout
 
 ## Current Scope
 
-The current foundation does not implement autonomous diagnosis or remediation yet. It provides the live substrate required by those capabilities:
+The current foundation does not implement autonomous diagnosis, runtime mitigation, code repair, CI/CD verification, or canary rollout yet. It provides the live substrate required by those capabilities:
 
 - a control plane,
 - an observable target service,
 - a sandbox registry,
 - persistent health checks,
-- and a database schema ready for incidents, evidence, actions, and memory.
+- a database schema ready for incidents, evidence, actions, and memory,
+- and a runtime boundary that can later support patch validation and canary deployment.
+
+The intended architecture separates immediate recovery from durable improvement. Runtime mitigations restore service quickly, while code and configuration changes should be validated through tests, sandbox replay, and canary rollout before promotion.
