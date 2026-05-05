@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.agents.graph import analyze_incident
 from app.core.db import get_connection
 from app.models.schemas import IncidentCreate
 
@@ -81,3 +82,60 @@ def get_incident_timeline(incident_id: str, conn: Connection = Depends(get_conne
             (incident_id,),
         )
         return {"events": cur.fetchall()}
+
+
+@router.post("/{incident_id}/analyze")
+def run_incident_analysis(incident_id: str, conn: Connection = Depends(get_connection)):
+    try:
+        analysis = analyze_incident(conn, incident_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return analysis.model_dump()
+
+
+@router.get("/{incident_id}/evidence")
+def get_incident_evidence(incident_id: str, conn: Connection = Depends(get_connection)):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, source, kind, content, confidence
+            FROM evidence_items
+            WHERE incident_id = %s
+            ORDER BY id
+            """,
+            (incident_id,),
+        )
+        return {"evidence": cur.fetchall()}
+
+
+@router.get("/{incident_id}/hypotheses")
+def get_incident_hypotheses(incident_id: str, conn: Connection = Depends(get_connection)):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, cause, evidence_ids, confidence, rationale_summary
+            FROM hypotheses
+            WHERE incident_id = %s
+            ORDER BY confidence DESC
+            """,
+            (incident_id,),
+        )
+        return {"hypotheses": cur.fetchall()}
+
+
+@router.get("/{incident_id}/actions")
+def get_incident_actions(incident_id: str, conn: Connection = Depends(get_connection)):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, action_type, params, risk_score, requires_approval, status, result
+            FROM remediation_actions
+            WHERE incident_id = %s
+            ORDER BY
+              CASE status WHEN 'selected' THEN 0 ELSE 1 END,
+              risk_score ASC
+            """,
+            (incident_id,),
+        )
+        return {"actions": cur.fetchall()}

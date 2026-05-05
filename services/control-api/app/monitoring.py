@@ -6,9 +6,17 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.agents.graph import analyze_incident
 from app.observability import record_incident_event, record_runtime_event
 
-OPEN_INCIDENT_STATUSES = ("detected", "investigating", "hypothesizing", "remediating", "verifying")
+OPEN_INCIDENT_STATUSES = (
+    "detected",
+    "investigating",
+    "hypothesizing",
+    "mitigation_selected",
+    "remediating",
+    "verifying",
+)
 
 
 def ensure_incident_for_unhealthy_check(
@@ -68,6 +76,17 @@ def ensure_incident_for_unhealthy_check(
             "health_check": health_result,
         },
     )
+    try:
+        analyze_incident(conn, str(incident["id"]))
+    except Exception as exc:
+        record_incident_event(
+            conn,
+            incident_id=str(incident["id"]),
+            sandbox_id=sandbox_id,
+            event_type="agent.failed",
+            actor="incident-agent",
+            payload={"error": type(exc).__name__, "message": str(exc)},
+        )
     return incident
 
 

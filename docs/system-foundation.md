@@ -11,6 +11,7 @@ The foundation includes:
 - Basic health monitoring loop
 - Controlled failure injection
 - Structured runtime event logging
+- Incident agent analysis for unhealthy service observations
 
 ## Services
 
@@ -46,6 +47,11 @@ POST http://localhost:8000/sandboxes/local-docker/scenarios/bad_database_url/act
 POST http://localhost:8000/sandboxes/local-docker/scenarios/reset
 GET  http://localhost:8000/events
 GET  http://localhost:8000/incidents
+POST http://localhost:8000/incidents/{incident_id}/analyze
+GET  http://localhost:8000/incidents/{incident_id}/timeline
+GET  http://localhost:8000/incidents/{incident_id}/evidence
+GET  http://localhost:8000/incidents/{incident_id}/hypotheses
+GET  http://localhost:8000/incidents/{incident_id}/actions
 ```
 
 Target API:
@@ -68,10 +74,11 @@ GET  http://localhost:8001/events
 4. The `health_checks` table should receive new rows from the background monitor.
 5. Activating `bad_database_url` should make target health unhealthy.
 6. The control plane should persist runtime events and create an incident record for the unhealthy check.
+7. The incident agent should collect evidence, rank a root-cause hypothesis, and select a typed mitigation candidate.
 
 ## Current Scope
 
-The current foundation does not implement autonomous diagnosis, runtime mitigation, code repair, CI/CD verification, or canary rollout yet. It provides the observable live substrate required by those capabilities:
+The current foundation includes deterministic incident diagnosis, but does not execute runtime mitigation, code repair, CI/CD verification, or canary rollout yet. It provides the observable live substrate required by those capabilities:
 
 - a control plane,
 - an observable target service,
@@ -80,6 +87,7 @@ The current foundation does not implement autonomous diagnosis, runtime mitigati
 - controlled failure scenarios,
 - structured runtime events,
 - incident records opened from unhealthy checks,
+- typed incident-agent evidence, hypotheses, and mitigation candidates,
 - a database schema ready for incidents, evidence, actions, and memory,
 - and a runtime boundary that can later support patch validation and canary deployment.
 

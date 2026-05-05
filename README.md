@@ -227,6 +227,7 @@ self-healing-architecture/
 
   docs/
     architecture.md
+    incident-agent.md
     walkthrough.md
     system-foundation.md
     roadmap.md
@@ -284,6 +285,7 @@ POST   /sandboxes/{sandbox_id}/scenarios/reset
 GET    /incidents
 POST   /incidents
 GET    /incidents/{incident_id}
+POST   /incidents/{incident_id}/analyze
 GET    /incidents/{incident_id}/timeline
 GET    /incidents/{incident_id}/evidence
 GET    /incidents/{incident_id}/hypotheses
@@ -307,7 +309,7 @@ GET    /events/stream
 
 ### Incident Agent
 
-The incident agent is a state machine, not an open-ended chatbot. It moves through explicit states:
+The incident agent is a state machine, not an open-ended chatbot. The current implementation uses deterministic rules over typed evidence; the same interface can later be backed by LangGraph and an LLM provider. It moves through explicit states:
 
 ```text
 detect_failure
