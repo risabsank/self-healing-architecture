@@ -48,7 +48,7 @@ services:
       target-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3).read()"]
+      test: ["CMD", "python", "-c", "import json, sys, urllib.request; body=json.loads(urllib.request.urlopen('http://localhost:8001/health', timeout=3).read()); sys.exit(0 if body.get('status') == 'healthy' else 1)"]
       interval: 10s
       timeout: 5s
       retries: 12

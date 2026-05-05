@@ -164,7 +164,9 @@ self-healing-architecture/
           routes/
             health.py
             incidents.py
+            observability.py
             sandboxes.py
+            scenarios.py
             actions.py
             releases.py
             timeline.py
@@ -272,7 +274,12 @@ Example routes:
 GET    /health
 POST   /sandboxes
 GET    /sandboxes/{sandbox_id}
-POST   /sandboxes/{sandbox_id}/scenario/{scenario_name}
+GET    /sandboxes/{sandbox_id}/health-history
+GET    /sandboxes/{sandbox_id}/timeline
+GET    /sandboxes/{sandbox_id}/scenarios
+POST   /sandboxes/{sandbox_id}/scenarios/{scenario_name}/activate
+POST   /sandboxes/{sandbox_id}/scenarios/{scenario_name}/deactivate
+POST   /sandboxes/{sandbox_id}/scenarios/reset
 
 GET    /incidents
 POST   /incidents
@@ -294,6 +301,7 @@ POST   /releases/{release_id}/rollback
 GET    /memory/search?query=...
 POST   /memory/reindex
 
+GET    /events
 GET    /events/stream
 ```
 

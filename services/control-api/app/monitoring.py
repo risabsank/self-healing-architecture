@@ -6,6 +6,110 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.observability import record_incident_event, record_runtime_event
+
+OPEN_INCIDENT_STATUSES = ("detected", "investigating", "hypothesizing", "remediating", "verifying")
+
+
+def ensure_incident_for_unhealthy_check(
+    conn: Connection,
+    health_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if health_result["status"] != "unhealthy":
+        return None
+
+    sandbox_id = health_result["sandbox_id"]
+    service_name = health_result["service_name"]
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, status, title
+            FROM incidents
+            WHERE sandbox_id = %s AND status = ANY(%s)
+            ORDER BY detected_at DESC
+            LIMIT 1
+            """,
+            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
+        )
+        existing = cur.fetchone()
+
+        if existing:
+            record_incident_event(
+                conn,
+                incident_id=str(existing["id"]),
+                sandbox_id=sandbox_id,
+                event_type="healthcheck.unhealthy",
+                actor="monitor",
+                payload=health_result,
+            )
+            return existing
+
+        title = f"{service_name} is unhealthy"
+        cur.execute(
+            """
+            INSERT INTO incidents (sandbox_id, status, title)
+            VALUES (%s, 'detected', %s)
+            RETURNING id, sandbox_id, status, title, detected_at
+            """,
+            (sandbox_id, title),
+        )
+        incident = cur.fetchone()
+
+    record_incident_event(
+        conn,
+        incident_id=str(incident["id"]),
+        sandbox_id=sandbox_id,
+        event_type="incident.detected",
+        actor="monitor",
+        payload={
+            "title": title,
+            "trigger": "healthcheck.unhealthy",
+            "health_check": health_result,
+        },
+    )
+    return incident
+
+
+def record_recovery_observation(conn: Connection, health_result: dict[str, Any]) -> None:
+    if health_result["status"] != "healthy":
+        return
+
+    sandbox_id = health_result["sandbox_id"]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id
+            FROM incidents
+            WHERE sandbox_id = %s AND status = ANY(%s)
+            ORDER BY detected_at DESC
+            LIMIT 1
+            """,
+            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
+        )
+        incident = cur.fetchone()
+
+    if incident:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE incidents
+                SET status = 'resolved',
+                    resolved_at = now(),
+                    final_summary = 'Service health recovered after observation.'
+                WHERE id = %s
+                """,
+                (incident["id"],),
+            )
+        record_incident_event(
+            conn,
+            incident_id=str(incident["id"]),
+            sandbox_id=sandbox_id,
+            event_type="incident.resolved",
+            actor="monitor",
+            payload=health_result,
+        )
+
 
 async def check_service_health(
     conn: Connection,
@@ -43,17 +147,29 @@ async def check_service_health(
             (sandbox_id, service_name, status, latency_ms, Jsonb(detail)),
         )
         inserted = cur.fetchone()
-    conn.commit()
 
-    return {
-        "id": inserted["id"],
-        "checked_at": inserted["checked_at"],
+    result = {
+        "id": str(inserted["id"]),
+        "checked_at": inserted["checked_at"].isoformat(),
         "sandbox_id": sandbox_id,
         "service_name": service_name,
         "status": status,
         "latency_ms": latency_ms,
         "detail": detail,
     }
+    record_runtime_event(
+        conn,
+        event_type="healthcheck.recorded",
+        actor="monitor",
+        sandbox_id=sandbox_id,
+        service_name=service_name,
+        payload=result,
+    )
+    ensure_incident_for_unhealthy_check(conn, result)
+    record_recovery_observation(conn, result)
+    conn.commit()
+
+    return result
 
 
 async def run_all_health_checks(conn: Connection) -> list[dict[str, Any]]:

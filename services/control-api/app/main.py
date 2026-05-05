@@ -5,7 +5,9 @@ from fastapi import FastAPI
 
 from app.api.routes.health import router as health_router
 from app.api.routes.incidents import router as incidents_router
+from app.api.routes.observability import router as observability_router
 from app.api.routes.sandboxes import router as sandboxes_router
+from app.api.routes.scenarios import router as scenarios_router
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
 from app.monitoring import monitor_loop
@@ -35,6 +37,8 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(sandboxes_router)
 app.include_router(incidents_router)
+app.include_router(scenarios_router)
+app.include_router(observability_router)
 
 
 @app.get("/")

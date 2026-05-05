@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS health_checks (
   checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS runtime_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
+  service_name TEXT,
+  ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+  type TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sandbox_id TEXT NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
@@ -143,6 +153,9 @@ ALTER TABLE incident_memories
 
 CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
   ON health_checks (sandbox_id, checked_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_events_sandbox_ts
+  ON runtime_events (sandbox_id, ts DESC);
 
 CREATE INDEX IF NOT EXISTS idx_incidents_sandbox_status
   ON incidents (sandbox_id, status);
