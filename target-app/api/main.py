@@ -68,6 +68,19 @@ class ItemCreate(BaseModel):
     name: str
 
 
+class RestoreConfigRequest(BaseModel):
+    key: str
+    scenario: str
+
+
+class RollbackConfigRequest(BaseModel):
+    target: str
+
+
+class RestartRequest(BaseModel):
+    service: str
+
+
 def record_event(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     event = {
         "ts": datetime.now(UTC).isoformat(),
@@ -267,6 +280,101 @@ def reset_scenarios():
     ACTIVE_SCENARIOS.clear()
     event = record_event("scenario.reset", {"previous": previous})
     return {"active": [], "event": event}
+
+
+@app.post("/runtime/restart")
+def restart_service(request: RestartRequest):
+    if request.service != "target-api":
+        raise HTTPException(status_code=404, detail="Runtime service is not managed by this target")
+
+    ACTIVE_SCENARIOS.discard("port_conflict")
+    event = record_event(
+        "runtime.restart_requested",
+        {
+            "service": request.service,
+            "cleared_scenarios": ["port_conflict"],
+        },
+    )
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
+
+
+@app.post("/runtime/config/restore")
+def restore_config(request: RestoreConfigRequest):
+    scenario_by_key = {
+        "DATABASE_URL": "bad_database_url",
+        "TARGET_REQUIRED_SECRET": "missing_required_env",
+    }
+    expected_scenario = scenario_by_key.get(request.key)
+    if not expected_scenario or request.scenario != expected_scenario:
+        raise HTTPException(status_code=400, detail="Config key is not restorable through this runtime action")
+
+    ACTIVE_SCENARIOS.discard(expected_scenario)
+    event = record_event(
+        "runtime.config_restored",
+        {
+            "key": request.key,
+            "cleared_scenarios": [expected_scenario],
+        },
+    )
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
+
+
+@app.post("/runtime/feature-flags/{flag}/disable")
+def disable_feature_flag(flag: str):
+    if flag != "FEATURE_CHECKOUT_ENABLED":
+        raise HTTPException(status_code=404, detail="Feature flag is not managed by this target")
+
+    cleared = []
+    for scenario in ("bad_feature_flag", "rate_limit"):
+        if scenario in ACTIVE_SCENARIOS:
+            ACTIVE_SCENARIOS.discard(scenario)
+            cleared.append(scenario)
+
+    event = record_event(
+        "runtime.feature_flag_disabled",
+        {
+            "flag": flag,
+            "cleared_scenarios": cleared,
+        },
+    )
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
+
+
+@app.post("/runtime/dependencies/{dependency}/switch-to-mock")
+def switch_dependency_to_mock(dependency: str):
+    if dependency != "checkout-provider":
+        raise HTTPException(status_code=404, detail="Dependency is not managed by this target")
+
+    cleared = []
+    for scenario in ("dependency_unavailable", "rate_limit"):
+        if scenario in ACTIVE_SCENARIOS:
+            ACTIVE_SCENARIOS.discard(scenario)
+            cleared.append(scenario)
+
+    event = record_event(
+        "runtime.dependency_switched_to_mock",
+        {
+            "dependency": dependency,
+            "cleared_scenarios": cleared,
+        },
+    )
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
+
+
+@app.post("/runtime/config/rollback")
+def rollback_config(request: RollbackConfigRequest):
+    if request.target != "previous_known_good_app_version":
+        raise HTTPException(status_code=404, detail="Rollback target is not managed by this target")
+
+    ACTIVE_SCENARIOS.discard("schema_mismatch")
+    event = record_event(
+        "runtime.config_rolled_back",
+        {
+            "target": request.target,
+            "cleared_scenarios": ["schema_mismatch"],
+        },
+    )
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.get("/events")

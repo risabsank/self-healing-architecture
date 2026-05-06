@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes.actions import router as actions_router
 from app.api.routes.health import router as health_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.observability import router as observability_router
@@ -39,12 +40,13 @@ app.include_router(sandboxes_router)
 app.include_router(incidents_router)
 app.include_router(scenarios_router)
 app.include_router(observability_router)
+app.include_router(actions_router)
 
 
 @app.get("/")
 def root():
     return {
         "service": "self-healing-control-api",
-        "capability": "runtime-foundation",
+        "capability": "guarded-runtime-mitigation",
         "docs": "/docs",
     }

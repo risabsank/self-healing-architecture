@@ -227,6 +227,7 @@ self-healing-architecture/
 
   docs/
     architecture.md
+    guarded-runtime-mitigation.md
     incident-agent.md
     walkthrough.md
     system-foundation.md
@@ -291,8 +292,11 @@ GET    /incidents/{incident_id}/evidence
 GET    /incidents/{incident_id}/hypotheses
 GET    /incidents/{incident_id}/actions
 
+GET    /actions/allowed
 POST   /actions/{action_id}/approve
 POST   /actions/{action_id}/reject
+POST   /actions/{action_id}/execute
+POST   /incidents/{incident_id}/actions/execute-selected
 
 GET    /releases
 GET    /releases/{release_id}
@@ -380,14 +384,14 @@ Example allowed actions:
 from enum import Enum
 
 class AllowedAction(str, Enum):
-    SET_ENV_VAR = "set_env_var"
-    RESTART_SERVICE = "restart_service"
-    ROLLBACK_CONFIG = "rollback_config"
-    DISABLE_FEATURE_FLAG = "disable_feature_flag"
-    RUN_DB_MIGRATION = "run_db_migration"
-    SCALE_REPLICA = "scale_replica"
-    SWITCH_DEPENDENCY_TO_MOCK = "switch_dependency_to_mock"
+    SET_ENV_VAR = "SET_ENV_VAR"
+    RESTART_SERVICE = "RESTART_SERVICE"
+    ROLLBACK_CONFIG = "ROLLBACK_CONFIG"
+    DISABLE_FEATURE_FLAG = "DISABLE_FEATURE_FLAG"
+    SWITCH_DEPENDENCY_TO_MOCK = "SWITCH_DEPENDENCY_TO_MOCK"
 ```
+
+The current executor intentionally excludes arbitrary shell commands, unbounded filesystem writes, database mutations, and free-form Docker operations. Each action is validated against required parameters, risk score, approval policy, and a target-specific runtime adapter.
 
 Code and release operations are separate from runtime mitigation actions:
 
@@ -420,6 +424,21 @@ Safe action example:
 }
 ```
 
+Approval-gated action example:
+
+```json
+{
+  "action_type": "ROLLBACK_CONFIG",
+  "params": {
+    "service": "target-api",
+    "target": "previous_known_good_app_version"
+  },
+  "risk_score": 0.42,
+  "requires_approval": true,
+  "status": "selected"
+}
+```
+
 Blocked action example:
 
 ```json
@@ -432,6 +451,19 @@ Blocked action example:
   "reason": "Action type is not allowlisted"
 }
 ```
+
+Runtime mitigation execution is replayable through incident events:
+
+```text
+agent.mitigation_selected
+mitigation.executing
+mitigation.awaiting_approval
+healthcheck.recorded
+mitigation.executed
+incident.resolved
+```
+
+See `docs/guarded-runtime-mitigation.md` for the executor contract and operator workflow.
 
 ## Self-Improvement Workflow
 

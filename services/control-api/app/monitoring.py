@@ -14,8 +14,10 @@ OPEN_INCIDENT_STATUSES = (
     "investigating",
     "hypothesizing",
     "mitigation_selected",
+    "awaiting_approval",
     "remediating",
     "verifying",
+    "blocked",
 )
 
 
