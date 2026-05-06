@@ -39,10 +39,8 @@ async def execute_remediation_action(
         )
         ensure_executable(action)
     except (ActionPolicyError, ActionBlockedError) as exc:
-        status = "awaiting_approval" if str(exc) == "Action requires approval before execution" else "blocked"
-        incident_status = "awaiting_approval" if status == "awaiting_approval" else "blocked"
-        event_type = f"mitigation.{status}"
-        write_state(conn, action, incident, status, event_type, actor, {"reason": str(exc)}, incident_status)
+        status = blocked_status(exc)
+        write_state(conn, action, incident, status, f"mitigation.{status}", actor, {"reason": str(exc)}, status)
         conn.commit()
         raise ActionBlockedError(str(exc)) from exc
 
@@ -95,6 +93,10 @@ def ensure_executable(action: dict[str, Any]) -> None:
         raise ActionBlockedError("Action requires approval before execution")
 
 
+def blocked_status(exc: Exception) -> str:
+    return "awaiting_approval" if str(exc) == "Action requires approval before execution" else "blocked"
+
+
 def load_action(conn: Connection, action_id: str) -> dict[str, Any]:
     action = fetch_one(
         conn,
@@ -144,11 +146,10 @@ def fetch_one(conn: Connection, sql: str, params: tuple[Any, ...]) -> dict[str, 
 
 async def apply_runtime_action(action_type: str, params: dict[str, Any], base_url: str) -> dict[str, Any]:
     if action_type == "SET_ENV_VAR":
-        scenarios = {"DATABASE_URL": "bad_database_url", "TARGET_REQUIRED_SECRET": "missing_required_env"}
         return await target_request(
             "POST",
             f"{base_url}/runtime/config/restore",
-            {"key": params["key"], "scenario": scenarios[params["key"]]},
+            {"key": params["key"], "scenario": config_scenario(params["key"])},
         )
     if action_type == "RESTART_SERVICE":
         return await target_request("POST", f"{base_url}/runtime/restart", {"service": params["service"]})
@@ -162,6 +163,11 @@ async def apply_runtime_action(action_type: str, params: dict[str, Any], base_ur
     if action_type == "ROLLBACK_CONFIG":
         return await target_request("POST", f"{base_url}/runtime/config/rollback", {"target": params["target"]})
     raise ActionExecutionError(f"Action type has no runtime adapter: {action_type}")
+
+
+def config_scenario(key: str) -> str:
+    scenarios = {"DATABASE_URL": "bad_database_url", "TARGET_REQUIRED_SECRET": "missing_required_env"}
+    return scenarios[key]
 
 
 async def switch_dependency_to_mock(base_url: str, dependency: str) -> dict[str, Any]:

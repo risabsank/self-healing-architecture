@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Self-Healing Runtime Operator Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Self-Healing Runtime</p>
+        <h1>Operator Dashboard</h1>
+      </div>
+      <div class="toolbar">
+        <label class="api-field">
+          <span>Control API</span>
+          <input id="api-base" type="url" autocomplete="off" />
+        </label>
+        <button id="save-api" type="button">Save</button>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="status-strip" class="status-strip" aria-live="polite"></section>
+      <p id="error-banner" class="error-banner" hidden></p>
+
+      <div class="workspace">
+        <aside class="panel left-rail">
+          <section>
+            <div class="section-title">
+              <h2>Sandbox Health</h2>
+              <button id="run-health" type="button">Run Check</button>
+            </div>
+            <div id="sandbox-health" class="stack"></div>
+          </section>
+
+          <section>
+            <div class="section-title">
+              <h2>Failure Scenarios</h2>
+              <button id="reset-scenarios" type="button">Reset</button>
+            </div>
+            <div id="scenario-list" class="scenario-list"></div>
+          </section>
+
+          <section>
+            <div class="section-title">
+              <h2>Incidents</h2>
+              <button id="analyze-incident" type="button">Analyze</button>
+            </div>
+            <div id="incident-list" class="incident-list"></div>
+          </section>
+        </aside>
+
+        <section class="panel center-stage">
+          <div id="incident-header" class="incident-header"></div>
+          <div class="section-title timeline-title">
+            <h2>Timeline</h2>
+            <button id="execute-selected" type="button">Execute Selected Action</button>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </section>
+
+        <aside class="panel right-rail">
+          <section>
+            <h2>Evidence</h2>
+            <div id="evidence-list" class="stack"></div>
+          </section>
+
+          <section>
+            <h2>Hypotheses</h2>
+            <div id="hypothesis-list" class="stack"></div>
+          </section>
+
+          <section>
+            <h2>Actions & Guardrails</h2>
+            <div id="action-list" class="stack"></div>
+          </section>
+
+          <section>
+            <h2>Verification</h2>
+            <div id="verification-list" class="stack"></div>
+          </section>
+
+          <section>
+            <h2>Memory Matches</h2>
+            <div id="memory-list" class="stack"></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

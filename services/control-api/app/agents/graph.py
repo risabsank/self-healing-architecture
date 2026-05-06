@@ -93,58 +93,61 @@ def analyze_incident(conn: Connection, incident_id: str) -> IncidentAnalysis:
     )
 
     clear_previous_analysis(conn, incident_id)
-    set_incident_status(conn, incident_id, "investigating")
-    record_incident_event(
-        conn,
-        incident_id=incident_id,
-        sandbox_id=analysis.sandbox_id,
-        event_type="agent.started",
-        actor="incident-agent",
-        payload={"state": "collect_evidence"},
-    )
+    transition(conn, analysis, "investigating", "agent.started", {"state": "collect_evidence"})
 
     analysis.evidence = collect_evidence(conn, analysis.sandbox_id)
     evidence_ids = persist_evidence(conn, incident_id, analysis.evidence)
-    record_incident_event(
-        conn,
-        incident_id=incident_id,
-        sandbox_id=analysis.sandbox_id,
-        event_type="agent.evidence_collected",
-        actor="incident-agent",
-        payload={"evidence_count": len(analysis.evidence), "evidence": [e.model_dump() for e in analysis.evidence]},
-    )
+    record_agent_event(conn, analysis, "agent.evidence_collected", {
+        "evidence_count": len(analysis.evidence),
+        "evidence": [e.model_dump() for e in analysis.evidence],
+    })
 
     set_incident_status(conn, incident_id, "hypothesizing")
     analysis.hypotheses = generate_hypotheses(analysis.evidence)
     persist_hypotheses(conn, incident_id, analysis.hypotheses, evidence_ids)
     persist_top_root_cause(conn, incident_id, analysis.hypotheses)
-    record_incident_event(
-        conn,
-        incident_id=incident_id,
-        sandbox_id=analysis.sandbox_id,
-        event_type="agent.hypotheses_ranked",
-        actor="incident-agent",
-        payload={"hypotheses": [h.model_dump() for h in analysis.hypotheses]},
-    )
+    record_agent_event(conn, analysis, "agent.hypotheses_ranked", {
+        "hypotheses": [h.model_dump() for h in analysis.hypotheses],
+    })
 
     analysis.mitigations = propose_mitigations(analysis.hypotheses, analysis.evidence)
     analysis.selected_mitigation = select_mitigation(analysis.mitigations)
     persist_mitigations(conn, incident_id, analysis.mitigations, analysis.selected_mitigation)
-    record_incident_event(
-        conn,
-        incident_id=incident_id,
-        sandbox_id=analysis.sandbox_id,
-        event_type="agent.mitigation_selected",
-        actor="incident-agent",
-        payload={
-            "candidates": [m.model_dump() for m in analysis.mitigations],
-            "selected": analysis.selected_mitigation.model_dump() if analysis.selected_mitigation else None,
-        },
-    )
+    record_agent_event(conn, analysis, "agent.mitigation_selected", {
+        "candidates": [m.model_dump() for m in analysis.mitigations],
+        "selected": analysis.selected_mitigation.model_dump() if analysis.selected_mitigation else None,
+    })
 
     set_incident_status(conn, incident_id, "mitigation_selected")
     conn.commit()
     return analysis
+
+
+def transition(
+    conn: Connection,
+    analysis: IncidentAnalysis,
+    status: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    set_incident_status(conn, analysis.incident_id, status)
+    record_agent_event(conn, analysis, event_type, payload)
+
+
+def record_agent_event(
+    conn: Connection,
+    analysis: IncidentAnalysis,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    record_incident_event(
+        conn,
+        incident_id=analysis.incident_id,
+        sandbox_id=analysis.sandbox_id,
+        event_type=event_type,
+        actor="incident-agent",
+        payload=payload,
+    )
 
 
 def clear_previous_analysis(conn: Connection, incident_id: str) -> None:

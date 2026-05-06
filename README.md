@@ -70,7 +70,7 @@ Key technical contributions:
 - Database: Postgres
 - Vector memory: pgvector or Chroma
 - Sandbox: Docker for the first runtime backend, with Firecracker/MicroVM support as a major architecture track
-- Frontend: Next.js + TypeScript
+- Frontend: lightweight operator dashboard, with a path to Next.js + TypeScript as the interface grows
 - Observability: OpenTelemetry-style structured event logs and dashboard timelines
 - Target app: intentionally breakable web service with API and database dependency
 
@@ -78,7 +78,7 @@ Key technical contributions:
 
 ```text
 ┌──────────────────────────┐
-│ Next.js Dashboard        │
+│ Operator Dashboard       │
 │ incidents, timeline, UI  │
 └────────────┬─────────────┘
              │ REST / SSE / WebSocket
@@ -152,10 +152,10 @@ Key technical contributions:
 self-healing-architecture/
   apps/
     dashboard/
-      app/
-      components/
-      lib/
-        api.ts
+      index.html
+      app.js
+      styles.css
+      server.mjs
 
   services/
     control-api/
@@ -169,39 +169,15 @@ self-healing-architecture/
             sandboxes.py
             scenarios.py
             actions.py
-            releases.py
-            timeline.py
+            memory.py
         agents/
           graph.py
-          prompts.py
-          repair_graph.py
           state.py
-          tools.py
-        cicd/
-          verifier.py
-          test_runner.py
-          rollout.py
-        codegen/
-          patch_planner.py
-          patch_writer.py
-          regression_writer.py
         core/
           config.py
           db.py
-          telemetry.py
-        memory/
-          retriever.py
-          writer.py
         models/
-          action.py
-          incident.py
-          memory.py
-        observability/
-          event_log.py
           schemas.py
-        policy/
-          engine.py
-          rules.py
         sandbox/
           action_executor.py
           allowed_actions.py
@@ -215,11 +191,6 @@ self-healing-architecture/
       Dockerfile
     db/
       init.sql
-    scenarios/
-      break_db_url.py
-      break_env_var.py
-      break_feature_flag.py
-      break_schema.py
 
   infra/
     docker-compose.yml
@@ -232,8 +203,6 @@ self-healing-architecture/
     incident-agent.md
     walkthrough.md
     system-foundation.md
-    roadmap.md
-    firecracker-notes.md
 ```
 
 ## Local Development
@@ -247,15 +216,24 @@ docker compose -f infra/docker-compose.yml up --build
 Main services:
 
 ```text
+Dashboard    http://localhost:3000
 Control API  http://localhost:8000
 Target API   http://localhost:8001
 Postgres     localhost:5432
 Target DB    localhost:5433
 ```
 
+Start the operator dashboard in a separate terminal:
+
+```bash
+cd apps/dashboard
+npm run dev
+```
+
 Useful checks:
 
 ```text
+GET  http://localhost:3000
 GET  http://localhost:8000/health
 GET  http://localhost:8000/sandboxes/local-docker
 POST http://localhost:8000/sandboxes/local-docker/health-check
