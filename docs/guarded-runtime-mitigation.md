@@ -12,7 +12,7 @@ incident agent
 -> action policy validation
 -> approval gate when required
 -> target-specific runtime adapter
--> health verification
+-> recovery verification suite
 -> incident timeline events
 ```
 
@@ -68,7 +68,7 @@ Example:
 }
 ```
 
-For the local target app, this routes through `POST /runtime/config/restore` and clears the corresponding injected failure. The executor then runs the target health check and records the verification result.
+For the local target app, this routes through `POST /runtime/config/restore` and clears the corresponding injected failure. The executor then runs the recovery verification suite and records the verification result.
 
 ## Approval-Gated Actions
 
@@ -119,6 +119,9 @@ Mitigation execution writes structured events to the incident timeline:
 mitigation.executing
 mitigation.awaiting_approval
 healthcheck.recorded
+verification.started
+verification.completed
+verification.failed
 mitigation.executed
 mitigation.failed
 mitigation.blocked
@@ -127,6 +130,30 @@ mitigation.rejected
 ```
 
 Runtime-level events are also stored in `runtime_events` so the sandbox timeline can show both the action and the target response.
+
+## Recovery Verification
+
+The executor does not treat a runtime action as recovered just because the action request succeeded. After every mitigation, it runs a structured verification suite:
+
+```text
+health_check
+metadata_check
+scenario_clearance
+database_backed_endpoint
+dependency_probe
+action-specific checks
+```
+
+Action-specific checks include:
+
+- `SET_ENV_VAR` with `DATABASE_URL`: database health is restored and `/items` works.
+- `SET_ENV_VAR` with `TARGET_REQUIRED_SECRET`: required environment validation passes.
+- `RESTART_SERVICE`: process health returns to normal.
+- `DISABLE_FEATURE_FLAG`: checkout no longer fails from the broken flag or rate limit.
+- `SWITCH_DEPENDENCY_TO_MOCK`: checkout dependency behavior is healthy.
+- `ROLLBACK_CONFIG`: schema-compatible endpoints work after rollback.
+
+The incident resolves only when the verification status is `passed`. If the action executes but verification fails, the incident remains in `verifying` for further analysis or another mitigation.
 
 ## Local Validation Flow
 

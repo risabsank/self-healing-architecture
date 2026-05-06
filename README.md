@@ -22,12 +22,13 @@ The system is designed to be easy to understand while still reflecting productio
 6. The agent generates typed hypotheses and ranks likely root causes.
 7. The agent selects a safe mitigation action from an allowlisted interface.
 8. The mitigation is applied inside the sandbox to restore service quickly.
-9. When the failure indicates a durable defect, a repair agent proposes a code or configuration change.
-10. The change is validated through tests, static checks, and sandbox verification.
-11. A canary deployment receives limited traffic while health and regression signals are monitored.
-12. The runtime promotes, rolls back, or quarantines the change based on verification results.
-13. The incident summary, evidence, action, code change, rollout result, and outcome are stored in memory.
-14. The dashboard displays a replayable incident and release timeline.
+9. The runtime verifies recovery with health checks, endpoint checks, dependency probes, and scenario-specific validation.
+10. When the failure indicates a durable defect, a repair agent proposes a code or configuration change.
+11. The change is validated through tests, static checks, and sandbox verification.
+12. A canary deployment receives limited traffic while health and regression signals are monitored.
+13. The runtime promotes, rolls back, or quarantines the change based on verification results.
+14. The incident summary, evidence, action, code change, rollout result, and outcome are stored in memory.
+15. The dashboard displays a replayable incident and release timeline.
 
 The core moment: the service breaks live, the runtime investigates like an incident responder, restores service with a constrained mitigation, proposes a durable fix, validates it through a deployment pipeline, canaries it safely, and leaves behind a complete audit trail.
 
@@ -136,7 +137,7 @@ Key technical contributions:
 7. Rank possible root causes.
 8. Select a safe runtime mitigation.
 9. Apply the mitigation inside the sandbox through the controlled executor.
-10. Verify service recovery.
+10. Verify service recovery with health checks, endpoint checks, dependency checks, and scenario-specific validation.
 11. Decide whether the failure requires a durable repair.
 12. Generate a bounded code, test, or configuration patch.
 13. Run CI checks, regression tests, static analysis, and sandbox verification.
@@ -459,9 +460,20 @@ agent.mitigation_selected
 mitigation.executing
 mitigation.awaiting_approval
 healthcheck.recorded
+verification.started
+verification.completed
 mitigation.executed
 incident.resolved
 ```
+
+Recovery verification includes:
+
+- target health status,
+- target metadata reachability,
+- active failure scenario clearance,
+- database-backed endpoint checks,
+- dependency endpoint checks,
+- action-specific assertions such as database connectivity after `DATABASE_URL` restoration or schema compatibility after rollback.
 
 See `docs/guarded-runtime-mitigation.md` for the executor contract and operator workflow.
 

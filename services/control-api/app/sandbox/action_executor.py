@@ -4,9 +4,9 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from app.monitoring import check_service_health
 from app.observability import record_incident_event, record_runtime_event
 from app.sandbox.allowed_actions import ActionPolicyError, validate_action_policy
+from app.sandbox.verification import verify_recovery
 
 
 class ActionExecutionError(RuntimeError):
@@ -63,11 +63,22 @@ async def execute_remediation_action(
             params=params,
             base_url=service["base_url"],
         )
-        verification = await check_service_health(
-            conn=conn,
+        record_incident_event(
+            conn,
+            incident_id=str(incident["id"]),
             sandbox_id=incident["sandbox_id"],
-            service_name=service["service_name"],
-            health_url=service["health_url"],
+            event_type="verification.started",
+            actor=actor,
+            payload={
+                "action_id": str(action["id"]),
+                "action_type": action["action_type"],
+            },
+        )
+        verification = await verify_recovery(
+            conn=conn,
+            incident_id=str(incident["id"]),
+            action=action,
+            service=service,
         )
         result = {
             "status": "executed",
@@ -261,7 +272,8 @@ def mark_action_executed(
     result: dict[str, Any],
 ) -> None:
     verification = result.get("verification") or {}
-    incident_status = "resolved" if verification.get("status") == "healthy" else "verifying"
+    verification_passed = verification.get("status") == "passed"
+    incident_status = "resolved" if verification_passed else "verifying"
     final_summary = (
         "Service health recovered after guarded runtime mitigation."
         if incident_status == "resolved"
@@ -291,6 +303,18 @@ def mark_action_executed(
         else:
             cur.execute("UPDATE incidents SET status = %s WHERE id = %s", (incident_status, incident["id"]))
 
+    record_incident_event(
+        conn,
+        incident_id=str(incident["id"]),
+        sandbox_id=incident["sandbox_id"],
+        event_type="verification.completed" if verification_passed else "verification.failed",
+        actor=actor,
+        payload={
+            "action_id": str(action["id"]),
+            "action_type": action["action_type"],
+            "verification": verification,
+        },
+    )
     record_incident_event(
         conn,
         incident_id=str(incident["id"]),

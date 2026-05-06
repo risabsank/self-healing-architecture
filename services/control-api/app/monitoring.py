@@ -137,6 +137,7 @@ async def check_service_health(
     sandbox_id: str,
     service_name: str,
     health_url: str,
+    manage_incidents: bool = True,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     status = "unknown"
@@ -186,8 +187,9 @@ async def check_service_health(
         service_name=service_name,
         payload=result,
     )
-    ensure_incident_for_unhealthy_check(conn, result)
-    record_recovery_observation(conn, result)
+    if manage_incidents:
+        ensure_incident_for_unhealthy_check(conn, result)
+        record_recovery_observation(conn, result)
     conn.commit()
 
     return result
