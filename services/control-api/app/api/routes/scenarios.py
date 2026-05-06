@@ -56,21 +56,7 @@ async def activate_scenario(
     scenario_name: str,
     conn: Connection = Depends(get_connection),
 ):
-    base_url = get_target_base_url(conn, sandbox_id)
-    result = await proxy_target_request("POST", f"{base_url}/scenarios/{scenario_name}/activate")
-    record_runtime_event(
-        conn,
-        event_type="scenario.activated",
-        actor="control-api",
-        sandbox_id=sandbox_id,
-        service_name="target-api",
-        payload={
-            "scenario": scenario_name,
-            "target_result": result,
-        },
-    )
-    conn.commit()
-    return result
+    return await change_scenario(conn, sandbox_id, f"/scenarios/{scenario_name}/activate", "scenario.activated", scenario_name)
 
 
 @router.post("/{scenario_name}/deactivate")
@@ -79,34 +65,33 @@ async def deactivate_scenario(
     scenario_name: str,
     conn: Connection = Depends(get_connection),
 ):
-    base_url = get_target_base_url(conn, sandbox_id)
-    result = await proxy_target_request("POST", f"{base_url}/scenarios/{scenario_name}/deactivate")
-    record_runtime_event(
-        conn,
-        event_type="scenario.deactivated",
-        actor="control-api",
-        sandbox_id=sandbox_id,
-        service_name="target-api",
-        payload={
-            "scenario": scenario_name,
-            "target_result": result,
-        },
-    )
-    conn.commit()
-    return result
+    return await change_scenario(conn, sandbox_id, f"/scenarios/{scenario_name}/deactivate", "scenario.deactivated", scenario_name)
 
 
 @router.post("/reset")
 async def reset_scenarios(sandbox_id: str, conn: Connection = Depends(get_connection)):
+    return await change_scenario(conn, sandbox_id, "/scenarios/reset", "scenario.reset")
+
+
+async def change_scenario(
+    conn: Connection,
+    sandbox_id: str,
+    path: str,
+    event_type: str,
+    scenario_name: str | None = None,
+) -> dict:
     base_url = get_target_base_url(conn, sandbox_id)
-    result = await proxy_target_request("POST", f"{base_url}/scenarios/reset")
+    result = await proxy_target_request("POST", f"{base_url}{path}")
+    payload = {"target_result": result}
+    if scenario_name:
+        payload["scenario"] = scenario_name
     record_runtime_event(
         conn,
-        event_type="scenario.reset",
+        event_type=event_type,
         actor="control-api",
         sandbox_id=sandbox_id,
         service_name="target-api",
-        payload={"target_result": result},
+        payload=payload,
     )
     conn.commit()
     return result

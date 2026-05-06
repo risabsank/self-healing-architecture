@@ -30,31 +30,20 @@ def ensure_incident_for_unhealthy_check(
 
     sandbox_id = health_result["sandbox_id"]
     service_name = health_result["service_name"]
+    existing = find_open_incident(conn, sandbox_id)
+
+    if existing:
+        record_incident_event(
+            conn,
+            incident_id=str(existing["id"]),
+            sandbox_id=sandbox_id,
+            event_type="healthcheck.unhealthy",
+            actor="monitor",
+            payload=health_result,
+        )
+        return existing
 
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, status, title
-            FROM incidents
-            WHERE sandbox_id = %s AND status = ANY(%s)
-            ORDER BY detected_at DESC
-            LIMIT 1
-            """,
-            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
-        )
-        existing = cur.fetchone()
-
-        if existing:
-            record_incident_event(
-                conn,
-                incident_id=str(existing["id"]),
-                sandbox_id=sandbox_id,
-                event_type="healthcheck.unhealthy",
-                actor="monitor",
-                payload=health_result,
-            )
-            return existing
-
         title = f"{service_name} is unhealthy"
         cur.execute(
             """
@@ -97,19 +86,7 @@ def record_recovery_observation(conn: Connection, health_result: dict[str, Any])
         return
 
     sandbox_id = health_result["sandbox_id"]
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id
-            FROM incidents
-            WHERE sandbox_id = %s AND status = ANY(%s)
-            ORDER BY detected_at DESC
-            LIMIT 1
-            """,
-            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
-        )
-        incident = cur.fetchone()
-
+    incident = find_open_incident(conn, sandbox_id)
     if incident:
         with conn.cursor() as cur:
             cur.execute(
@@ -130,6 +107,21 @@ def record_recovery_observation(conn: Connection, health_result: dict[str, Any])
             actor="monitor",
             payload=health_result,
         )
+
+
+def find_open_incident(conn: Connection, sandbox_id: str) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, status, title
+            FROM incidents
+            WHERE sandbox_id = %s AND status = ANY(%s)
+            ORDER BY detected_at DESC
+            LIMIT 1
+            """,
+            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
+        )
+        return cur.fetchone()
 
 
 async def check_service_health(

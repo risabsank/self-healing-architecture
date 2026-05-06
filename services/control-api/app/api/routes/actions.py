@@ -24,70 +24,18 @@ def approve_action(action_id: str, conn: Connection = Depends(get_connection)):
     action = load_action_for_update(conn, action_id)
     if not action["requires_approval"]:
         raise HTTPException(status_code=409, detail="Action does not require approval")
-
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'approved',
-                result = coalesce(result, '{}'::jsonb) || %s
-            WHERE id = %s
-            RETURNING id, incident_id, action_type, params, risk_score, requires_approval, status, result
-            """,
-            (Jsonb({"approval": {"status": "approved", "actor": "operator"}}), action_id),
-        )
-        updated = cur.fetchone()
-        cur.execute("UPDATE incidents SET status = 'mitigation_selected' WHERE id = %s", (action["incident_id"],))
-
-    record_incident_event(
-        conn,
-        incident_id=str(action["incident_id"]),
-        sandbox_id=action["sandbox_id"],
-        event_type="mitigation.approved",
-        actor="operator",
-        payload={"action_id": action_id, "action_type": action["action_type"]},
-    )
-    conn.commit()
-    return updated
+    return set_approval(conn, action, "approved", "mitigation_selected")
 
 
 @router.post("/actions/{action_id}/reject")
 def reject_action(action_id: str, conn: Connection = Depends(get_connection)):
     action = load_action_for_update(conn, action_id)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'rejected',
-                result = coalesce(result, '{}'::jsonb) || %s
-            WHERE id = %s
-            RETURNING id, incident_id, action_type, params, risk_score, requires_approval, status, result
-            """,
-            (Jsonb({"approval": {"status": "rejected", "actor": "operator"}}), action_id),
-        )
-        updated = cur.fetchone()
-        cur.execute("UPDATE incidents SET status = 'blocked' WHERE id = %s", (action["incident_id"],))
-
-    record_incident_event(
-        conn,
-        incident_id=str(action["incident_id"]),
-        sandbox_id=action["sandbox_id"],
-        event_type="mitigation.rejected",
-        actor="operator",
-        payload={"action_id": action_id, "action_type": action["action_type"]},
-    )
-    conn.commit()
-    return updated
+    return set_approval(conn, action, "rejected", "blocked")
 
 
 @router.post("/actions/{action_id}/execute")
 async def execute_action(action_id: str, conn: Connection = Depends(get_connection)):
-    try:
-        return await execute_remediation_action(conn, action_id)
-    except ActionBlockedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ActionExecutionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await execute_or_raise(conn, action_id)
 
 
 @router.post("/incidents/{incident_id}/actions/execute-selected")
@@ -96,12 +44,47 @@ async def execute_selected_action(incident_id: str, conn: Connection = Depends(g
     if not action:
         raise HTTPException(status_code=404, detail="Selected remediation action not found")
 
+    return await execute_or_raise(conn, str(action["id"]))
+
+
+async def execute_or_raise(conn: Connection, action_id: str):
     try:
-        return await execute_remediation_action(conn, str(action["id"]))
+        return await execute_remediation_action(conn, action_id)
     except ActionBlockedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ActionExecutionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def set_approval(conn: Connection, action: dict, status: str, incident_status: str):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE remediation_actions
+            SET status = %s,
+                result = coalesce(result, '{}'::jsonb) || %s
+            WHERE id = %s
+            RETURNING id, incident_id, action_type, params, risk_score, requires_approval, status, result
+            """,
+            (
+                status,
+                Jsonb({"approval": {"status": status, "actor": "operator"}}),
+                action["id"],
+            ),
+        )
+        updated = cur.fetchone()
+        cur.execute("UPDATE incidents SET status = %s WHERE id = %s", (incident_status, action["incident_id"]))
+
+    record_incident_event(
+        conn,
+        incident_id=str(action["incident_id"]),
+        sandbox_id=action["sandbox_id"],
+        event_type=f"mitigation.{status}",
+        actor="operator",
+        payload={"action_id": str(action["id"]), "action_type": action["action_type"]},
+    )
+    conn.commit()
+    return updated
 
 
 def load_action_for_update(conn: Connection, action_id: str):

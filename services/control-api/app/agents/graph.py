@@ -10,127 +10,76 @@ from app.observability import record_incident_event
 SAFE_AUTONOMOUS_RISK_THRESHOLD = 0.35
 
 
+def scenario(cause: str, confidence: float, rationale: str, *mitigations: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cause": cause,
+        "confidence": confidence,
+        "rationale": rationale,
+        "mitigations": list(mitigations),
+    }
+
+
+def mitigation(
+    action_type: str,
+    expected_effect: str,
+    risk_score: float,
+    requires_approval: bool = False,
+    **params: Any,
+) -> dict[str, Any]:
+    return {
+        "action_type": action_type,
+        "params": {"service": "target-api", **params},
+        "expected_effect": expected_effect,
+        "risk_score": risk_score,
+        "requires_approval": requires_approval,
+    }
+
+
 SCENARIO_ROOT_CAUSES: dict[str, dict[str, Any]] = {
-    "bad_database_url": {
-        "cause": "Broken database connection string",
-        "confidence": 0.92,
-        "rationale": "The database health check failed while the process and required environment checks remained healthy.",
-        "mitigations": [
-            {
-                "action_type": "SET_ENV_VAR",
-                "params": {
-                    "service": "target-api",
-                    "key": "DATABASE_URL",
-                    "value_from": "known_good_config",
-                },
-                "expected_effect": "Restore database connectivity for the target API.",
-                "risk_score": 0.2,
-                "requires_approval": False,
-            },
-            {
-                "action_type": "RESTART_SERVICE",
-                "params": {"service": "target-api"},
-                "expected_effect": "Reload service configuration after restoring DATABASE_URL.",
-                "risk_score": 0.18,
-                "requires_approval": False,
-            },
-        ],
-    },
-    "missing_required_env": {
-        "cause": "Missing required environment variable",
-        "confidence": 0.9,
-        "rationale": "The required environment check failed before deeper service dependencies were needed.",
-        "mitigations": [
-            {
-                "action_type": "SET_ENV_VAR",
-                "params": {
-                    "service": "target-api",
-                    "key": "TARGET_REQUIRED_SECRET",
-                    "value_from": "known_good_config",
-                },
-                "expected_effect": "Restore the required runtime configuration value.",
-                "risk_score": 0.2,
-                "requires_approval": False,
-            },
-            {
-                "action_type": "RESTART_SERVICE",
-                "params": {"service": "target-api"},
-                "expected_effect": "Reload environment after restoring the missing variable.",
-                "risk_score": 0.18,
-                "requires_approval": False,
-            },
-        ],
-    },
-    "schema_mismatch": {
-        "cause": "Application/schema mismatch after change",
-        "confidence": 0.86,
-        "rationale": "The health payload reports a schema mismatch consistent with app code expecting a missing database shape.",
-        "mitigations": [
-            {
-                "action_type": "ROLLBACK_CONFIG",
-                "params": {"service": "target-api", "target": "previous_known_good_app_version"},
-                "expected_effect": "Return the app to a version compatible with the current schema.",
-                "risk_score": 0.42,
-                "requires_approval": True,
-            }
-        ],
-    },
-    "port_conflict": {
-        "cause": "Service process or port binding conflict",
-        "confidence": 0.82,
-        "rationale": "The process check reports a simulated port binding conflict.",
-        "mitigations": [
-            {
-                "action_type": "RESTART_SERVICE",
-                "params": {"service": "target-api"},
-                "expected_effect": "Restart the service to clear the runtime conflict.",
-                "risk_score": 0.22,
-                "requires_approval": False,
-            }
-        ],
-    },
-    "bad_feature_flag": {
-        "cause": "Bad feature flag enabled a broken code path",
-        "confidence": 0.8,
-        "rationale": "The active scenario indicates a feature-specific failure that can be isolated by disabling the flag.",
-        "mitigations": [
-            {
-                "action_type": "DISABLE_FEATURE_FLAG",
-                "params": {"service": "target-api", "flag": "FEATURE_CHECKOUT_ENABLED"},
-                "expected_effect": "Disable the broken checkout path while preserving core service health.",
-                "risk_score": 0.16,
-                "requires_approval": False,
-            }
-        ],
-    },
-    "dependency_unavailable": {
-        "cause": "Downstream API dependency unavailable",
-        "confidence": 0.78,
-        "rationale": "The active scenario indicates dependency failure isolated to a dependent route.",
-        "mitigations": [
-            {
-                "action_type": "SWITCH_DEPENDENCY_TO_MOCK",
-                "params": {"service": "target-api", "dependency": "checkout-provider"},
-                "expected_effect": "Route calls to a known-good fallback dependency.",
-                "risk_score": 0.3,
-                "requires_approval": False,
-            }
-        ],
-    },
-    "rate_limit": {
-        "cause": "Dependency rate limiting",
-        "confidence": 0.74,
-        "rationale": "The active scenario indicates dependency throttling; traffic should be reduced or backed off.",
-        "mitigations": [
-            {
-                "action_type": "DISABLE_FEATURE_FLAG",
-                "params": {"service": "target-api", "flag": "FEATURE_CHECKOUT_ENABLED"},
-                "expected_effect": "Temporarily stop the rate-limited path while the system recovers.",
-                "risk_score": 0.24,
-                "requires_approval": False,
-            }
-        ],
-    },
+    "bad_database_url": scenario(
+        "Broken database connection string",
+        0.92,
+        "The database health check failed while the process and required environment checks remained healthy.",
+        mitigation("SET_ENV_VAR", "Restore database connectivity for the target API.", 0.2, key="DATABASE_URL", value_from="known_good_config"),
+        mitigation("RESTART_SERVICE", "Reload service configuration after restoring DATABASE_URL.", 0.18),
+    ),
+    "missing_required_env": scenario(
+        "Missing required environment variable",
+        0.9,
+        "The required environment check failed before deeper service dependencies were needed.",
+        mitigation("SET_ENV_VAR", "Restore the required runtime configuration value.", 0.2, key="TARGET_REQUIRED_SECRET", value_from="known_good_config"),
+        mitigation("RESTART_SERVICE", "Reload environment after restoring the missing variable.", 0.18),
+    ),
+    "schema_mismatch": scenario(
+        "Application/schema mismatch after change",
+        0.86,
+        "The health payload reports a schema mismatch consistent with app code expecting a missing database shape.",
+        mitigation("ROLLBACK_CONFIG", "Return the app to a version compatible with the current schema.", 0.42, True, target="previous_known_good_app_version"),
+    ),
+    "port_conflict": scenario(
+        "Service process or port binding conflict",
+        0.82,
+        "The process check reports a simulated port binding conflict.",
+        mitigation("RESTART_SERVICE", "Restart the service to clear the runtime conflict.", 0.22),
+    ),
+    "bad_feature_flag": scenario(
+        "Bad feature flag enabled a broken code path",
+        0.8,
+        "The active scenario indicates a feature-specific failure that can be isolated by disabling the flag.",
+        mitigation("DISABLE_FEATURE_FLAG", "Disable the broken checkout path while preserving core service health.", 0.16, flag="FEATURE_CHECKOUT_ENABLED"),
+    ),
+    "dependency_unavailable": scenario(
+        "Downstream API dependency unavailable",
+        0.78,
+        "The active scenario indicates dependency failure isolated to a dependent route.",
+        mitigation("SWITCH_DEPENDENCY_TO_MOCK", "Route calls to a known-good fallback dependency.", 0.3, dependency="checkout-provider"),
+    ),
+    "rate_limit": scenario(
+        "Dependency rate limiting",
+        0.74,
+        "The active scenario indicates dependency throttling; traffic should be reduced or backed off.",
+        mitigation("DISABLE_FEATURE_FLAG", "Temporarily stop the rate-limited path while the system recovers.", 0.24, flag="FEATURE_CHECKOUT_ENABLED"),
+    ),
 }
 
 

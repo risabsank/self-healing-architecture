@@ -31,302 +31,228 @@ async def execute_remediation_action(
 
     try:
         policy = validate_action_policy(
-            action_type=action["action_type"],
-            params=params,
-            risk_score=float(action["risk_score"]),
-            requires_approval=bool(action["requires_approval"]),
+            action["action_type"],
+            params,
+            float(action["risk_score"]),
+            bool(action["requires_approval"]),
         )
-    except ActionPolicyError as exc:
-        result = mark_action_blocked(conn, action, incident, actor, str(exc))
+        ensure_executable(action)
+    except (ActionPolicyError, ActionBlockedError) as exc:
+        status = "awaiting_approval" if str(exc) == "Action requires approval before execution" else "blocked"
+        incident_status = "awaiting_approval" if status == "awaiting_approval" else "blocked"
+        event_type = f"mitigation.{status}"
+        write_state(conn, action, incident, status, event_type, actor, {"reason": str(exc)}, incident_status)
         conn.commit()
         raise ActionBlockedError(str(exc)) from exc
 
-    if action["status"] not in EXECUTABLE_STATUSES:
-        message = f"Action status does not allow execution: {action['status']}"
-        result = mark_action_blocked(conn, action, incident, actor, message)
-        conn.commit()
-        raise ActionBlockedError(message)
-
-    if action["requires_approval"] and action["status"] != "approved":
-        message = "Action requires approval before execution"
-        result = mark_action_awaiting_approval(conn, action, incident, actor, message)
-        conn.commit()
-        raise ActionBlockedError(message)
-
     service = load_service(conn, incident["sandbox_id"], params["service"])
-    mark_action_executing(conn, action, incident, actor, policy.description)
+    write_state(
+        conn,
+        action,
+        incident,
+        "executing",
+        "mitigation.executing",
+        actor,
+        {"params": params, "policy": policy.description},
+        "remediating",
+    )
     conn.commit()
 
     try:
-        target_result = await apply_runtime_action(
-            action_type=action["action_type"],
-            params=params,
-            base_url=service["base_url"],
-        )
+        # The executor only calls typed target runtime endpoints. It never
+        # receives or runs raw shell commands.
+        target_result = await apply_runtime_action(action["action_type"], params, service["base_url"])
         record_incident_event(
             conn,
             incident_id=str(incident["id"]),
             sandbox_id=incident["sandbox_id"],
             event_type="verification.started",
             actor=actor,
-            payload={
-                "action_id": str(action["id"]),
-                "action_type": action["action_type"],
-            },
+            payload={"action_id": str(action["id"]), "action_type": action["action_type"]},
         )
-        verification = await verify_recovery(
-            conn=conn,
-            incident_id=str(incident["id"]),
-            action=action,
-            service=service,
-        )
+        verification = await verify_recovery(conn, str(incident["id"]), action, service)
         result = {
             "status": "executed",
             "policy": policy.description,
             "target_result": target_result,
             "verification": verification,
         }
-        mark_action_executed(conn, action, incident, actor, result)
+        finish_execution(conn, action, incident, actor, result)
         conn.commit()
         return result
     except Exception as exc:
-        result = {
-            "status": "failed",
-            "error": type(exc).__name__,
-            "message": str(exc),
-        }
-        mark_action_failed(conn, action, incident, actor, result)
+        result = {"status": "failed", "error": type(exc).__name__, "message": str(exc)}
+        write_state(conn, action, incident, "failed", "mitigation.failed", actor, {"result": result}, "mitigation_failed")
         conn.commit()
         raise ActionExecutionError(str(exc)) from exc
 
 
-def load_action(conn: Connection, action_id: str) -> dict[str, Any]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, incident_id, action_type, params, risk_score, requires_approval, status, result
-            FROM remediation_actions
-            WHERE id = %s
-            """,
-            (action_id,),
-        )
-        action = cur.fetchone()
+def ensure_executable(action: dict[str, Any]) -> None:
+    if action["status"] not in EXECUTABLE_STATUSES:
+        raise ActionBlockedError(f"Action status does not allow execution: {action['status']}")
+    if action["requires_approval"] and action["status"] != "approved":
+        raise ActionBlockedError("Action requires approval before execution")
 
+
+def load_action(conn: Connection, action_id: str) -> dict[str, Any]:
+    action = fetch_one(
+        conn,
+        """
+        SELECT id, incident_id, action_type, params, risk_score, requires_approval, status, result
+        FROM remediation_actions
+        WHERE id = %s
+        """,
+        (action_id,),
+    )
     if not action:
         raise ActionExecutionError(f"Remediation action not found: {action_id}")
     return action
 
 
 def load_incident(conn: Connection, incident_id: str) -> dict[str, Any]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, sandbox_id, status, title
-            FROM incidents
-            WHERE id = %s
-            """,
-            (incident_id,),
-        )
-        incident = cur.fetchone()
-
+    incident = fetch_one(
+        conn,
+        "SELECT id, sandbox_id, status, title FROM incidents WHERE id = %s",
+        (incident_id,),
+    )
     if not incident:
         raise ActionExecutionError(f"Incident not found: {incident_id}")
     return incident
 
 
 def load_service(conn: Connection, sandbox_id: str, service_name: str) -> dict[str, Any]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT sandbox_id, service_name, service_type, base_url, health_url, metadata
-            FROM sandbox_services
-            WHERE sandbox_id = %s AND service_name = %s
-            """,
-            (sandbox_id, service_name),
-        )
-        service = cur.fetchone()
-
+    service = fetch_one(
+        conn,
+        """
+        SELECT sandbox_id, service_name, service_type, base_url, health_url, metadata
+        FROM sandbox_services
+        WHERE sandbox_id = %s AND service_name = %s
+        """,
+        (sandbox_id, service_name),
+    )
     if not service or not service["base_url"] or not service["health_url"]:
         raise ActionExecutionError(f"Sandbox service is not executable: {sandbox_id}/{service_name}")
     return service
 
 
+def fetch_one(conn: Connection, sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchone()
+
+
 async def apply_runtime_action(action_type: str, params: dict[str, Any], base_url: str) -> dict[str, Any]:
     if action_type == "SET_ENV_VAR":
-        return await restore_config_value(base_url, params["key"])
-
+        scenarios = {"DATABASE_URL": "bad_database_url", "TARGET_REQUIRED_SECRET": "missing_required_env"}
+        return await target_request(
+            "POST",
+            f"{base_url}/runtime/config/restore",
+            {"key": params["key"], "scenario": scenarios[params["key"]]},
+        )
     if action_type == "RESTART_SERVICE":
         return await target_request("POST", f"{base_url}/runtime/restart", {"service": params["service"]})
-
     if action_type == "DISABLE_FEATURE_FLAG":
-        return await disable_feature_flag(base_url, params["flag"])
-
+        result = await target_request("POST", f"{base_url}/runtime/feature-flags/{params['flag']}/disable", {})
+        if "rate_limit" in result.get("active", []):
+            result["rate_limit_dependency_fallback"] = await switch_dependency_to_mock(base_url, "checkout-provider")
+        return result
     if action_type == "SWITCH_DEPENDENCY_TO_MOCK":
         return await switch_dependency_to_mock(base_url, params["dependency"])
-
     if action_type == "ROLLBACK_CONFIG":
-        return await rollback_config(base_url, params["target"])
-
+        return await target_request("POST", f"{base_url}/runtime/config/rollback", {"target": params["target"]})
     raise ActionExecutionError(f"Action type has no runtime adapter: {action_type}")
 
 
-async def restore_config_value(base_url: str, key: str) -> dict[str, Any]:
-    scenario_by_key = {
-        "DATABASE_URL": "bad_database_url",
-        "TARGET_REQUIRED_SECRET": "missing_required_env",
-    }
-    return await target_request(
-        "POST",
-        f"{base_url}/runtime/config/restore",
-        {"key": key, "scenario": scenario_by_key[key]},
-    )
-
-
-async def disable_feature_flag(base_url: str, flag: str) -> dict[str, Any]:
-    result = await target_request("POST", f"{base_url}/runtime/feature-flags/{flag}/disable", {})
-    if "rate_limit" in result.get("active", []):
-        rate_limit_result = await target_request(
-            "POST",
-            f"{base_url}/runtime/dependencies/checkout-provider/switch-to-mock",
-            {},
-        )
-        result["rate_limit_dependency_fallback"] = rate_limit_result
-    return result
-
-
 async def switch_dependency_to_mock(base_url: str, dependency: str) -> dict[str, Any]:
-    return await target_request(
-        "POST",
-        f"{base_url}/runtime/dependencies/{dependency}/switch-to-mock",
-        {},
-    )
-
-
-async def rollback_config(base_url: str, target: str) -> dict[str, Any]:
-    return await target_request("POST", f"{base_url}/runtime/config/rollback", {"target": target})
+    return await target_request("POST", f"{base_url}/runtime/dependencies/{dependency}/switch-to-mock", {})
 
 
 async def target_request(method: str, url: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.request(method, url, json=payload)
+            body = response.json()
     except httpx.HTTPError as exc:
         raise ActionExecutionError(f"Target runtime action failed: {exc}") from exc
-
-    try:
-        body = response.json()
     except ValueError as exc:
         raise ActionExecutionError("Target runtime action returned non-JSON response") from exc
 
     if response.status_code >= 400:
         raise ActionExecutionError(f"Target runtime action rejected request: {body}")
-
     return body
 
 
-def mark_action_executing(
+def write_state(
     conn: Connection,
     action: dict[str, Any],
     incident: dict[str, Any],
+    action_status: str,
+    event_type: str,
     actor: str,
-    policy_description: str,
+    payload: dict[str, Any],
+    incident_status: str,
 ) -> None:
-    result = {
-        **(action["result"] or {}),
-        "execution": {
-            "status": "executing",
-            "policy": policy_description,
-        },
-    }
+    result = {**(action["result"] or {}), "execution": {"status": action_status, **payload}}
     with conn.cursor() as cur:
         cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'executing', result = %s
-            WHERE id = %s
-            """,
-            (Jsonb(result), action["id"]),
+            "UPDATE remediation_actions SET status = %s, result = %s WHERE id = %s",
+            (action_status, Jsonb(result), action["id"]),
         )
-        cur.execute("UPDATE incidents SET status = 'remediating' WHERE id = %s", (incident["id"],))
+        cur.execute("UPDATE incidents SET status = %s WHERE id = %s", (incident_status, incident["id"]))
 
     record_incident_event(
         conn,
         incident_id=str(incident["id"]),
         sandbox_id=incident["sandbox_id"],
-        event_type="mitigation.executing",
+        event_type=event_type,
         actor=actor,
-        payload={
-            "action_id": str(action["id"]),
-            "action_type": action["action_type"],
-            "params": action["params"],
-            "policy": policy_description,
-        },
+        payload={"action_id": str(action["id"]), "action_type": action["action_type"], **payload},
     )
 
 
-def mark_action_executed(
+def finish_execution(
     conn: Connection,
     action: dict[str, Any],
     incident: dict[str, Any],
     actor: str,
     result: dict[str, Any],
 ) -> None:
-    verification = result.get("verification") or {}
-    verification_passed = verification.get("status") == "passed"
+    verification_passed = result["verification"]["status"] == "passed"
+    event_type = "verification.completed" if verification_passed else "verification.failed"
     incident_status = "resolved" if verification_passed else "verifying"
-    final_summary = (
-        "Service health recovered after guarded runtime mitigation."
-        if incident_status == "resolved"
-        else None
-    )
 
     with conn.cursor() as cur:
         cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'executed', result = %s
-            WHERE id = %s
-            """,
+            "UPDATE remediation_actions SET status = 'executed', result = %s WHERE id = %s",
             (Jsonb({**(action["result"] or {}), "execution": result}), action["id"]),
         )
-        if final_summary:
+        if verification_passed:
             cur.execute(
                 """
                 UPDATE incidents
-                SET status = %s,
+                SET status = 'resolved',
                     resolved_at = coalesce(resolved_at, now()),
-                    final_summary = %s
+                    final_summary = 'Service health recovered after guarded runtime mitigation.'
                 WHERE id = %s
                 """,
-                (incident_status, final_summary, incident["id"]),
+                (incident["id"],),
             )
         else:
             cur.execute("UPDATE incidents SET status = %s WHERE id = %s", (incident_status, incident["id"]))
 
-    record_incident_event(
-        conn,
-        incident_id=str(incident["id"]),
-        sandbox_id=incident["sandbox_id"],
-        event_type="verification.completed" if verification_passed else "verification.failed",
-        actor=actor,
-        payload={
-            "action_id": str(action["id"]),
-            "action_type": action["action_type"],
-            "verification": verification,
-        },
-    )
-    record_incident_event(
-        conn,
-        incident_id=str(incident["id"]),
-        sandbox_id=incident["sandbox_id"],
-        event_type="mitigation.executed",
-        actor=actor,
-        payload={
-            "action_id": str(action["id"]),
-            "action_type": action["action_type"],
-            "result": result,
-        },
-    )
+    for timeline_type, payload in (
+        (event_type, {"verification": result["verification"]}),
+        ("mitigation.executed", {"result": result}),
+    ):
+        record_incident_event(
+            conn,
+            incident_id=str(incident["id"]),
+            sandbox_id=incident["sandbox_id"],
+            event_type=timeline_type,
+            actor=actor,
+            payload={"action_id": str(action["id"]), "action_type": action["action_type"], **payload},
+        )
+
     record_runtime_event(
         conn,
         event_type="mitigation.executed",
@@ -340,111 +266,3 @@ def mark_action_executed(
             "result": result,
         },
     )
-
-
-def mark_action_failed(
-    conn: Connection,
-    action: dict[str, Any],
-    incident: dict[str, Any],
-    actor: str,
-    result: dict[str, Any],
-) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'failed', result = %s
-            WHERE id = %s
-            """,
-            (Jsonb({**(action["result"] or {}), "execution": result}), action["id"]),
-        )
-        cur.execute("UPDATE incidents SET status = 'mitigation_failed' WHERE id = %s", (incident["id"],))
-
-    record_incident_event(
-        conn,
-        incident_id=str(incident["id"]),
-        sandbox_id=incident["sandbox_id"],
-        event_type="mitigation.failed",
-        actor=actor,
-        payload={"action_id": str(action["id"]), "action_type": action["action_type"], "result": result},
-    )
-
-
-def mark_action_blocked(
-    conn: Connection,
-    action: dict[str, Any],
-    incident: dict[str, Any],
-    actor: str,
-    reason: str,
-) -> dict[str, Any]:
-    result = {
-        **(action["result"] or {}),
-        "execution": {
-            "status": "blocked",
-            "reason": reason,
-        },
-    }
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'blocked', result = %s
-            WHERE id = %s
-            """,
-            (Jsonb(result), action["id"]),
-        )
-        cur.execute("UPDATE incidents SET status = 'blocked' WHERE id = %s", (incident["id"],))
-
-    record_incident_event(
-        conn,
-        incident_id=str(incident["id"]),
-        sandbox_id=incident["sandbox_id"],
-        event_type="mitigation.blocked",
-        actor=actor,
-        payload={
-            "action_id": str(action["id"]),
-            "action_type": action["action_type"],
-            "reason": reason,
-        },
-    )
-    return result
-
-
-def mark_action_awaiting_approval(
-    conn: Connection,
-    action: dict[str, Any],
-    incident: dict[str, Any],
-    actor: str,
-    reason: str,
-) -> dict[str, Any]:
-    result = {
-        **(action["result"] or {}),
-        "execution": {
-            "status": "awaiting_approval",
-            "reason": reason,
-        },
-    }
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE remediation_actions
-            SET status = 'awaiting_approval', result = %s
-            WHERE id = %s
-            """,
-            (Jsonb(result), action["id"]),
-        )
-        cur.execute("UPDATE incidents SET status = 'awaiting_approval' WHERE id = %s", (incident["id"],))
-
-    record_incident_event(
-        conn,
-        incident_id=str(incident["id"]),
-        sandbox_id=incident["sandbox_id"],
-        event_type="mitigation.awaiting_approval",
-        actor=actor,
-        payload={
-            "action_id": str(action["id"]),
-            "action_type": action["action_type"],
-            "reason": reason,
-        },
-    )
-    return result

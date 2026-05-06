@@ -95,6 +95,18 @@ def record_event(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
+def clear_scenarios(*scenarios: str) -> list[str]:
+    cleared = [scenario for scenario in scenarios if scenario in ACTIVE_SCENARIOS]
+    ACTIVE_SCENARIOS.difference_update(cleared)
+    return cleared
+
+
+def runtime_result(event_type: str, payload: dict[str, Any], *scenarios: str) -> dict[str, Any]:
+    payload = {**payload, "cleared_scenarios": clear_scenarios(*scenarios)}
+    event = record_event(event_type, payload)
+    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
+
+
 @contextmanager
 def db_connection():
     if not DATABASE_URL:
@@ -287,15 +299,11 @@ def restart_service(request: RestartRequest):
     if request.service != "target-api":
         raise HTTPException(status_code=404, detail="Runtime service is not managed by this target")
 
-    ACTIVE_SCENARIOS.discard("port_conflict")
-    event = record_event(
+    return runtime_result(
         "runtime.restart_requested",
-        {
-            "service": request.service,
-            "cleared_scenarios": ["port_conflict"],
-        },
+        {"service": request.service},
+        "port_conflict",
     )
-    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.post("/runtime/config/restore")
@@ -308,15 +316,11 @@ def restore_config(request: RestoreConfigRequest):
     if not expected_scenario or request.scenario != expected_scenario:
         raise HTTPException(status_code=400, detail="Config key is not restorable through this runtime action")
 
-    ACTIVE_SCENARIOS.discard(expected_scenario)
-    event = record_event(
+    return runtime_result(
         "runtime.config_restored",
-        {
-            "key": request.key,
-            "cleared_scenarios": [expected_scenario],
-        },
+        {"key": request.key},
+        expected_scenario,
     )
-    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.post("/runtime/feature-flags/{flag}/disable")
@@ -324,20 +328,12 @@ def disable_feature_flag(flag: str):
     if flag != "FEATURE_CHECKOUT_ENABLED":
         raise HTTPException(status_code=404, detail="Feature flag is not managed by this target")
 
-    cleared = []
-    for scenario in ("bad_feature_flag", "rate_limit"):
-        if scenario in ACTIVE_SCENARIOS:
-            ACTIVE_SCENARIOS.discard(scenario)
-            cleared.append(scenario)
-
-    event = record_event(
+    return runtime_result(
         "runtime.feature_flag_disabled",
-        {
-            "flag": flag,
-            "cleared_scenarios": cleared,
-        },
+        {"flag": flag},
+        "bad_feature_flag",
+        "rate_limit",
     )
-    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.post("/runtime/dependencies/{dependency}/switch-to-mock")
@@ -345,20 +341,12 @@ def switch_dependency_to_mock(dependency: str):
     if dependency != "checkout-provider":
         raise HTTPException(status_code=404, detail="Dependency is not managed by this target")
 
-    cleared = []
-    for scenario in ("dependency_unavailable", "rate_limit"):
-        if scenario in ACTIVE_SCENARIOS:
-            ACTIVE_SCENARIOS.discard(scenario)
-            cleared.append(scenario)
-
-    event = record_event(
+    return runtime_result(
         "runtime.dependency_switched_to_mock",
-        {
-            "dependency": dependency,
-            "cleared_scenarios": cleared,
-        },
+        {"dependency": dependency},
+        "dependency_unavailable",
+        "rate_limit",
     )
-    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.post("/runtime/config/rollback")
@@ -366,15 +354,11 @@ def rollback_config(request: RollbackConfigRequest):
     if request.target != "previous_known_good_app_version":
         raise HTTPException(status_code=404, detail="Rollback target is not managed by this target")
 
-    ACTIVE_SCENARIOS.discard("schema_mismatch")
-    event = record_event(
+    return runtime_result(
         "runtime.config_rolled_back",
-        {
-            "target": request.target,
-            "cleared_scenarios": ["schema_mismatch"],
-        },
+        {"target": request.target},
+        "schema_mismatch",
     )
-    return {"active": sorted(ACTIVE_SCENARIOS), "event": event}
 
 
 @app.get("/events")
