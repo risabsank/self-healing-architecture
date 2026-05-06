@@ -138,9 +138,12 @@ CREATE TABLE IF NOT EXISTS incident_memories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
   summary TEXT NOT NULL,
+  symptoms JSONB NOT NULL DEFAULT '[]'::jsonb,
+  evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
   root_cause TEXT,
   successful_action JSONB,
   failed_actions JSONB,
+  verification_result JSONB,
   repair_change JSONB,
   rollout_result JSONB,
   embedding vector(1536),
@@ -148,8 +151,15 @@ CREATE TABLE IF NOT EXISTS incident_memories (
 );
 
 ALTER TABLE incident_memories
+  ADD COLUMN IF NOT EXISTS symptoms JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS verification_result JSONB,
   ADD COLUMN IF NOT EXISTS repair_change JSONB,
   ADD COLUMN IF NOT EXISTS rollout_result JSONB;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
+  ON incident_memories (incident_id)
+  WHERE incident_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
   ON health_checks (sandbox_id, checked_at DESC);

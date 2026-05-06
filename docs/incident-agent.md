@@ -7,6 +7,7 @@ It currently runs as a deterministic state machine inside the control API. The i
 ## Responsibilities
 
 - Collect evidence from recent health checks, runtime events, service metadata, and active failure scenarios.
+- Retrieve similar resolved incidents from memory.
 - Persist evidence as structured records.
 - Generate root-cause hypotheses.
 - Rank hypotheses by confidence.
@@ -21,6 +22,7 @@ When the monitor observes an unhealthy health check, it creates an incident and 
 The resulting incident includes:
 
 - evidence records,
+- similar incident memory records,
 - ranked hypotheses,
 - mitigation candidates,
 - one selected mitigation,
@@ -41,6 +43,8 @@ GET http://localhost:8000/incidents/{incident_id}/timeline
 GET http://localhost:8000/incidents/{incident_id}/evidence
 GET http://localhost:8000/incidents/{incident_id}/hypotheses
 GET http://localhost:8000/incidents/{incident_id}/actions
+GET http://localhost:8000/memory/incidents
+GET http://localhost:8000/memory/search?query=database
 ```
 
 ## State Machine

@@ -132,7 +132,7 @@ def action_key(action_type: str, params: dict[str, Any]) -> str:
 
 
 async def fetch_many(*urls: str) -> tuple[dict[str, Any], ...]:
-    return tuple(await get_json(url) for url in urls)
+    return tuple([await get_json(url) for url in urls])
 
 
 async def get_json(url: str) -> dict[str, Any]:

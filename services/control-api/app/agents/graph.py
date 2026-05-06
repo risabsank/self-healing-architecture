@@ -4,6 +4,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from app.agents.state import Evidence, Hypothesis, IncidentAnalysis, MitigationCandidate
+from app.memory import retrieve_similar_memories
 from app.observability import record_incident_event
 
 
@@ -290,6 +291,9 @@ def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
             )
         )
 
+    for memory in retrieve_similar_memories(conn, evidence):
+        evidence.append(memory_evidence(memory))
+
     return evidence
 
 
@@ -372,6 +376,11 @@ def propose_mitigations(hypotheses: list[Hypothesis], evidence: list[Evidence]) 
             )
 
     if not candidates and hypotheses:
+        memory_candidate = mitigation_from_memory(evidence)
+        if memory_candidate:
+            candidates.append(memory_candidate)
+
+    if not candidates and hypotheses:
         candidates.append(
             MitigationCandidate(
                 action_type="RESTART_SERVICE",
@@ -384,6 +393,33 @@ def propose_mitigations(hypotheses: list[Hypothesis], evidence: list[Evidence]) 
         )
 
     return candidates
+
+
+def memory_evidence(memory: dict[str, Any]) -> Evidence:
+    return Evidence(
+        source="memory",
+        kind="similar_incident",
+        summary=f"Similar incident memory: {memory['summary']}",
+        content=memory,
+        confidence=min(0.9, 0.55 + memory["similarity_score"]),
+    )
+
+
+def mitigation_from_memory(evidence: list[Evidence]) -> MitigationCandidate | None:
+    for item in evidence:
+        if item.source != "memory":
+            continue
+        action = item.content.get("successful_action") or {}
+        if action.get("action_type") and action.get("params"):
+            return MitigationCandidate(
+                action_type=action["action_type"],
+                params=action["params"],
+                expected_effect=f"Reuse mitigation from similar incident memory {item.content.get('id')}.",
+                risk_score=min(float(action.get("risk_score") or 0.3), 0.35),
+                requires_approval=bool(action.get("requires_approval", False)),
+                rank=1,
+            )
+    return None
 
 
 def select_mitigation(candidates: list[MitigationCandidate]) -> MitigationCandidate | None:

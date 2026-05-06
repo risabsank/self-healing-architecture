@@ -305,8 +305,8 @@ GET    /releases/{release_id}/checks
 POST   /releases/{release_id}/approve
 POST   /releases/{release_id}/rollback
 
-GET    /memory/search?query=...
-POST   /memory/reindex
+GET    /memory/incidents
+GET    /memory/search?query=database
 
 GET    /events
 GET    /events/stream
@@ -1045,6 +1045,13 @@ Incident memory example:
     "database-backed endpoint failed"
   ],
   "root_cause": "bad database connection string",
+  "evidence": [
+    {
+      "source": "healthcheck",
+      "kind": "failed_check:database",
+      "confidence": 0.88
+    }
+  ],
   "successful_action": {
     "type": "SET_ENV_VAR",
     "params": {
@@ -1068,6 +1075,8 @@ Incident memory example:
   }
 }
 ```
+
+When a later incident is analyzed, similar memories are retrieved from stored symptoms, evidence, and root cause text. Matching memories become structured evidence with `source: "memory"` and can influence fallback mitigation selection when the current incident does not match a known scenario.
 
 Operational fact memory example:
 

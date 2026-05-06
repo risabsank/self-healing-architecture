@@ -4,6 +4,7 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.memory import write_incident_memory
 from app.observability import record_incident_event, record_runtime_event
 from app.sandbox.allowed_actions import ActionPolicyError, validate_action_policy
 from app.sandbox.verification import verify_recovery
@@ -266,3 +267,5 @@ def finish_execution(
             "result": result,
         },
     )
+    if verification_passed:
+        write_incident_memory(conn, str(incident["id"]))
