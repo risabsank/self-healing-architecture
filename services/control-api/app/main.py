@@ -12,6 +12,7 @@ from app.api.routes.observability import router as observability_router
 from app.api.routes.repairs import router as repairs_router
 from app.api.routes.sandboxes import router as sandboxes_router
 from app.api.routes.scenarios import router as scenarios_router
+from app.cicd import ensure_cicd_schema
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
 from app.memory import ensure_memory_schema
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     with open_connection() as conn:
         ensure_memory_schema(conn)
         ensure_repair_schema(conn)
+        ensure_cicd_schema(conn)
     monitor_task = asyncio.create_task(
         monitor_loop(open_connection, settings.monitor_interval_seconds)
     )

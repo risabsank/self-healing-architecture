@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 
+from app.cicd import list_verification_runs, run_verification_pipeline
 from app.core.db import get_connection
 from app.repair import (
     apply_repair,
@@ -45,6 +46,16 @@ def reject_repair_change(repair_id: str, conn: Connection = Depends(get_connecti
 @router.post("/repairs/{repair_id}/apply")
 def apply_repair_change(repair_id: str, conn: Connection = Depends(get_connection)):
     return repair_or_error(apply_repair, conn, repair_id)
+
+
+@router.get("/repairs/{repair_id}/verification-runs")
+def get_repair_verification_runs(repair_id: str, conn: Connection = Depends(get_connection)):
+    return {"verification_runs": list_verification_runs(conn, repair_id)}
+
+
+@router.post("/repairs/{repair_id}/verify")
+def verify_repair_change(repair_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(run_verification_pipeline, conn, repair_id, 422)
 
 
 def repair_or_error(operation, conn: Connection, identifier: str, status_code: int = 404):

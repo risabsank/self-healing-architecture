@@ -283,6 +283,8 @@ GET    /repairs/{repair_id}
 POST   /repairs/{repair_id}/approve
 POST   /repairs/{repair_id}/reject
 POST   /repairs/{repair_id}/apply
+GET    /repairs/{repair_id}/verification-runs
+POST   /repairs/{repair_id}/verify
 
 GET    /releases
 GET    /releases/{release_id}
