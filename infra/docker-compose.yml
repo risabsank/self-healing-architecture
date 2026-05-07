@@ -44,6 +44,8 @@ services:
       FEATURE_CHECKOUT_ENABLED: "true"
     ports:
       - "8001:8001"
+    volumes:
+      - ../target-app/api:/app
     depends_on:
       target-db:
         condition: service_healthy
@@ -60,8 +62,12 @@ services:
       DATABASE_URL: postgresql://self_healing:self_healing@postgres:5432/self_healing
       TARGET_API_BASE_URL: http://target-api:8001
       MONITOR_INTERVAL_SECONDS: "10"
+      REPAIR_REPO_ROOT: /workspace
+      REPAIR_APPROVED_PATHS: target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml
     ports:
       - "8000:8000"
+    volumes:
+      - ../:/workspace
     depends_on:
       postgres:
         condition: service_healthy

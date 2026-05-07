@@ -7,7 +7,7 @@ from app.observability import record_incident_event
 
 MEMORY_SELECT = """
 SELECT id, incident_id, summary, symptoms, root_cause,
-       successful_action, failed_actions, verification_result, created_at
+       successful_action, failed_actions, verification_result, repair_change, created_at
 FROM incident_memories
 """
 
@@ -18,6 +18,7 @@ def ensure_memory_schema(conn: Connection) -> None:
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS symptoms JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS verification_result JSONB")
+        cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS repair_change JSONB")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
@@ -75,6 +76,18 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
     )
 
     successful_action = next((action for action in actions if action["status"] == "executed"), None)
+    repair_change = fetch_one(
+        conn,
+        """
+        SELECT id, status, change_type, affected_paths, patch_summary,
+               risk_score, requires_approval, verification_plan, rollback_plan, result, created_at
+        FROM repair_changes
+        WHERE incident_id = %s
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        (incident_id,),
+    )
     failed_actions = failed_action_records(actions, failed_events)
     verification = (successful_action or {}).get("result", {}).get("execution", {}).get("verification")
     symptoms = extract_symptoms(evidence)
@@ -85,9 +98,9 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
             """
             INSERT INTO incident_memories (
               incident_id, summary, symptoms, evidence, root_cause,
-              successful_action, failed_actions, verification_result
+              successful_action, failed_actions, verification_result, repair_change
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (incident_id) WHERE incident_id IS NOT NULL
             DO UPDATE SET
               summary = EXCLUDED.summary,
@@ -96,8 +109,9 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
               root_cause = EXCLUDED.root_cause,
               successful_action = EXCLUDED.successful_action,
               failed_actions = EXCLUDED.failed_actions,
-              verification_result = EXCLUDED.verification_result
-            RETURNING id, incident_id, summary, symptoms, root_cause, successful_action, failed_actions, verification_result, created_at
+              verification_result = EXCLUDED.verification_result,
+              repair_change = EXCLUDED.repair_change
+            RETURNING id, incident_id, summary, symptoms, root_cause, successful_action, failed_actions, verification_result, repair_change, created_at
             """,
             (
                 incident_id,
@@ -108,6 +122,7 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
                 Jsonb(successful_action),
                 Jsonb(failed_actions),
                 Jsonb(verification),
+                Jsonb(serialize_repair_change(repair_change) if repair_change else None),
             ),
         )
         memory = cur.fetchone()
@@ -155,6 +170,14 @@ def serialize_memory(memory: dict[str, Any]) -> dict[str, Any]:
         "id": str(memory["id"]),
         "incident_id": str(memory["incident_id"]) if memory.get("incident_id") else None,
         "created_at": memory["created_at"].isoformat() if memory.get("created_at") else None,
+    }
+
+
+def serialize_repair_change(repair: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **repair,
+        "id": str(repair["id"]),
+        "created_at": repair["created_at"].isoformat() if repair.get("created_at") else None,
     }
 
 

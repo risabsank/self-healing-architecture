@@ -9,12 +9,14 @@ from app.api.routes.health import router as health_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.memory import router as memory_router
 from app.api.routes.observability import router as observability_router
+from app.api.routes.repairs import router as repairs_router
 from app.api.routes.sandboxes import router as sandboxes_router
 from app.api.routes.scenarios import router as scenarios_router
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
 from app.memory import ensure_memory_schema
 from app.monitoring import monitor_loop
+from app.repair import ensure_repair_schema
 
 
 @asynccontextmanager
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
     execute_schema_bootstrap()
     with open_connection() as conn:
         ensure_memory_schema(conn)
+        ensure_repair_schema(conn)
     monitor_task = asyncio.create_task(
         monitor_loop(open_connection, settings.monitor_interval_seconds)
     )
@@ -57,6 +60,7 @@ app.include_router(scenarios_router)
 app.include_router(observability_router)
 app.include_router(actions_router)
 app.include_router(memory_router)
+app.include_router(repairs_router)
 
 
 @app.get("/")

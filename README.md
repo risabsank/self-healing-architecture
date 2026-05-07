@@ -277,6 +277,13 @@ POST   /actions/{action_id}/reject
 POST   /actions/{action_id}/execute
 POST   /incidents/{incident_id}/actions/execute-selected
 
+GET    /incidents/{incident_id}/repairs
+POST   /incidents/{incident_id}/repairs/plan
+GET    /repairs/{repair_id}
+POST   /repairs/{repair_id}/approve
+POST   /repairs/{repair_id}/reject
+POST   /repairs/{repair_id}/apply
+
 GET    /releases
 GET    /releases/{release_id}
 GET    /releases/{release_id}/checks
