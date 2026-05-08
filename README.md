@@ -52,7 +52,7 @@ Self-Healing Runtime is more than “LLM watches logs and restarts services.” 
 
 Key technical contributions:
 
-- **Typed incident reasoning:** the agent emits structured evidence, hypotheses, risk scores, mitigation candidates, patch plans, rollout decisions, and verification results instead of chat messages.
+- **Typed incident reasoning:** the agent emits structured evidence, Claude-backed hypotheses, risk scores, mitigation candidates, patch plans, rollout decisions, and verification results instead of chat messages.
 - **Bounded autonomous repair:** the system can act, but only through safe runtime, patch, CI/CD, and rollout interfaces with explicit policy checks.
 - **Self-improvement loop:** incidents can produce durable code, configuration, or test changes that are validated before release.
 - **Canary-first deployment:** generated changes are released to an isolated canary target and promoted only after automated health and regression checks pass.
@@ -315,6 +315,8 @@ GET    /events/stream
 ```
 
 Production-oriented deployments can enable API-key authentication with `AUTH_ENABLED=true` and `API_KEYS` or `API_KEYS_FILE`. See `docs/production-hardening.md` for the worker, migration, tracing, secrets, CI, and runtime isolation model.
+
+Claude-backed reasoning can be enabled with `LLM_REASONING_ENABLED=true` and `ANTHROPIC_API_KEY`. See `docs/llm-reasoning.md` for the typed LangGraph/Claude incident and repair planning flow.
 
 ### Incident Agent
 

@@ -6,6 +6,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
+from app.agents.repair_llm import plan_repair_with_claude
 from app.core.config import settings
 from app.observability import record_incident_event
 from app.policy import PolicyDecision, evaluate_policy
@@ -129,7 +130,7 @@ def ensure_repair_schema(conn: Connection) -> None:
 
 def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
     incident = load_incident(conn, incident_id)
-    plan = plan_from_incident(incident)
+    plan = plan_from_incident(conn, incident)
     ensure_operations_are_allowed(plan.operations)
     policy = evaluate_repair_policy(plan)
     status = repair_status_for(policy)
@@ -211,7 +212,21 @@ def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     return updated
 
 
-def plan_from_incident(incident: dict[str, Any]) -> RepairPlan:
+def plan_from_incident(conn: Connection, incident: dict[str, Any]) -> RepairPlan:
+    return llm_repair_plan(conn, incident) or deterministic_plan_from_incident(incident)
+
+
+def llm_repair_plan(conn: Connection, incident: dict[str, Any]) -> RepairPlan | None:
+    if not settings.llm_reasoning_enabled:
+        return None
+    try:
+        decision = plan_repair_with_claude(conn, incident, approved_paths())
+        return RepairPlan(**decision.model_dump(), operations=[])
+    except Exception:
+        return None
+
+
+def deterministic_plan_from_incident(incident: dict[str, Any]) -> RepairPlan:
     root_cause = (incident.get("root_cause") or incident.get("title") or "").lower()
 
     for rule in REPAIR_RULES:

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     service_name: str = "self-healing-control-api"
     firecracker_api_url: str = ""
     firecracker_timeout_seconds: int = 10
+    llm_reasoning_enabled: bool = False
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-3-5-sonnet-latest"
+    anthropic_api_url: str = "https://api.anthropic.com/v1/messages"
+    anthropic_timeout_seconds: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

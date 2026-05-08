@@ -3,7 +3,9 @@ from typing import Any
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.agents.llm_graph import run_llm_incident_graph
 from app.agents.state import Evidence, Hypothesis, IncidentAnalysis, MitigationCandidate
+from app.core.config import settings
 from app.memory import retrieve_similar_memories
 from app.observability import record_incident_event
 
@@ -103,14 +105,17 @@ def analyze_incident(conn: Connection, incident_id: str) -> IncidentAnalysis:
     })
 
     set_incident_status(conn, incident_id, "hypothesizing")
-    analysis.hypotheses = generate_hypotheses(analysis.evidence)
+    analysis = reason_about_incident(conn, analysis)
     persist_hypotheses(conn, incident_id, analysis.hypotheses, evidence_ids)
     persist_top_root_cause(conn, incident_id, analysis.hypotheses)
     record_agent_event(conn, analysis, "agent.hypotheses_ranked", {
         "hypotheses": [h.model_dump() for h in analysis.hypotheses],
+        "reasoning_provider": analysis.reasoning_provider,
+        "reasoning_summary": analysis.reasoning_summary,
     })
 
-    analysis.mitigations = propose_mitigations(analysis.hypotheses, analysis.evidence)
+    if not analysis.mitigations:
+        analysis.mitigations = propose_mitigations(analysis.hypotheses, analysis.evidence)
     analysis.selected_mitigation = select_mitigation(analysis.mitigations)
     persist_mitigations(conn, incident_id, analysis.mitigations, analysis.selected_mitigation)
     record_agent_event(conn, analysis, "agent.mitigation_selected", {
@@ -120,6 +125,29 @@ def analyze_incident(conn: Connection, incident_id: str) -> IncidentAnalysis:
 
     set_incident_status(conn, incident_id, "mitigation_selected")
     conn.commit()
+    return analysis
+
+
+def reason_about_incident(conn: Connection, analysis: IncidentAnalysis) -> IncidentAnalysis:
+    if not settings.llm_reasoning_enabled:
+        return deterministic_reasoning(analysis)
+
+    try:
+        return run_llm_incident_graph(analysis)
+    except Exception as exc:
+        record_agent_event(conn, analysis, "agent.llm_reasoning_failed", {
+            "error": type(exc).__name__,
+            "message": str(exc),
+            "fallback": "deterministic",
+        })
+        return deterministic_reasoning(analysis)
+
+
+def deterministic_reasoning(analysis: IncidentAnalysis) -> IncidentAnalysis:
+    analysis.hypotheses = generate_hypotheses(analysis.evidence)
+    analysis.mitigations = propose_mitigations(analysis.hypotheses, analysis.evidence)
+    analysis.reasoning_provider = "deterministic"
+    analysis.reasoning_summary = "Deterministic rules ranked root causes from health checks, scenarios, and memory."
     return analysis
 
 
