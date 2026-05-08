@@ -16,19 +16,53 @@ const dom = Object.fromEntries([
   "reset-scenarios",
   "analyze-incident",
   "execute-selected",
+  "run-evaluation",
+  "plan-repair",
   "error-banner",
   "status-strip",
   "sandbox-health",
   "scenario-list",
   "incident-list",
+  "evaluation-list",
   "incident-header",
   "timeline",
   "evidence-list",
   "hypothesis-list",
   "action-list",
+  "repair-list",
+  "ci-list",
+  "canary-list",
+  "autonomy-list",
   "verification-list",
   "memory-list"
 ].map((id) => [camel(id), $(id)]));
+
+// The dashboard never performs runtime work directly; every operator action
+// goes through a bounded Control API endpoint.
+const BUTTON_ACTIONS = {
+  "save-api": () => saveApiBase(),
+  refresh: () => refresh(),
+  "run-health": () => mutate(`/sandboxes/${SANDBOX_ID}/health-check`),
+  "reset-scenarios": () => mutate(`/sandboxes/${SANDBOX_ID}/scenarios/reset`),
+  "run-evaluation": () => mutate("/evaluations/run", { scenarios: ["bad_database_url"], repeats: 1 }),
+  "analyze-incident": () => selected((id) => mutate(`/incidents/${id}/analyze`)),
+  "execute-selected": () => selected((id) => mutate(`/incidents/${id}/actions/execute-selected`)),
+  "plan-repair": () => selected((id) => mutate(`/incidents/${id}/repairs/plan`))
+};
+
+const DATASET_ACTIONS = {
+  actionExecute: (id) => mutate(`/actions/${id}/execute`),
+  actionApprove: (id) => mutate(`/actions/${id}/approve`),
+  actionReject: (id) => mutate(`/actions/${id}/reject`),
+  repairApprove: (id) => mutate(`/repairs/${id}/approve`),
+  repairReject: (id) => mutate(`/repairs/${id}/reject`),
+  repairApply: (id) => mutate(`/repairs/${id}/apply`),
+  repairVerify: (id) => mutate(`/repairs/${id}/verify`),
+  repairCanary: (id) => mutate(`/repairs/${id}/canary-rollouts/start`),
+  rolloutPromote: (id) => mutate(`/canary-rollouts/${id}/promote`),
+  rolloutRollback: (id) => mutate(`/canary-rollouts/${id}/rollback`),
+  rolloutQuarantine: (id) => mutate(`/canary-rollouts/${id}/quarantine`)
+};
 
 dom.apiBase.value = state.apiBase;
 document.addEventListener("click", handleClick);
@@ -41,17 +75,13 @@ async function handleClick(event) {
 
   const id = button.id;
   const data = button.dataset;
-  if (id === "save-api") return saveApiBase();
-  if (id === "refresh") return refresh();
-  if (id === "run-health") return mutate(`/sandboxes/${SANDBOX_ID}/health-check`);
-  if (id === "reset-scenarios") return mutate(`/sandboxes/${SANDBOX_ID}/scenarios/reset`);
-  if (id === "analyze-incident" && state.selectedIncidentId) return mutate(`/incidents/${state.selectedIncidentId}/analyze`);
-  if (id === "execute-selected" && state.selectedIncidentId) return mutate(`/incidents/${state.selectedIncidentId}/actions/execute-selected`);
+  if (BUTTON_ACTIONS[id]) return BUTTON_ACTIONS[id]();
   if (data.incident) return selectAndRefresh(data.incident);
   if (data.scenario) return mutate(`/sandboxes/${SANDBOX_ID}/scenarios/${data.scenario}/${data.next}`);
-  if (data.actionExecute) return mutate(`/actions/${data.actionExecute}/execute`);
-  if (data.actionApprove) return mutate(`/actions/${data.actionApprove}/approve`);
-  if (data.actionReject) return mutate(`/actions/${data.actionReject}/reject`);
+
+  for (const [key, action] of Object.entries(DATASET_ACTIONS)) {
+    if (data[key]) return action(data[key]);
+  }
 }
 
 function saveApiBase() {
@@ -65,10 +95,14 @@ async function selectAndRefresh(incidentId) {
   await refresh();
 }
 
-async function mutate(path) {
+function selected(callback) {
+  return state.selectedIncidentId ? callback(state.selectedIncidentId) : undefined;
+}
+
+async function mutate(path, body = null) {
   setBusy(true);
   try {
-    await api(path, { method: "POST" });
+    await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
     await refresh();
   } catch (error) {
     showError(error);
@@ -94,12 +128,13 @@ async function refresh() {
 }
 
 async function loadOverview() {
-  const [control, sandbox, scenarios, incidents, memories] = await Promise.all([
+  const [control, sandbox, scenarios, incidents, memories, evaluations] = await Promise.all([
     api("/health"),
     api(`/sandboxes/${SANDBOX_ID}`),
     api(`/sandboxes/${SANDBOX_ID}/scenarios`),
     api("/incidents"),
-    api("/memory/incidents?limit=6")
+    api("/memory/incidents?limit=6"),
+    api("/evaluations")
   ]);
 
   state.data = {
@@ -107,21 +142,27 @@ async function loadOverview() {
     sandbox,
     scenarios: normalizeScenarios(scenarios),
     incidents: incidents.incidents || [],
-    memories: memories.memories || []
+    memories: memories.memories || [],
+    evaluations: evaluations.runs || []
   };
 }
 
 async function loadIncident(incidentId) {
-  const [incident, timeline, evidence, hypotheses, actions] = await Promise.all([
+  const [incident, timeline, evidence, hypotheses, actions, repairs] = await Promise.all([
     api(`/incidents/${incidentId}`),
     api(`/incidents/${incidentId}/timeline`),
     api(`/incidents/${incidentId}/evidence`),
     api(`/incidents/${incidentId}/hypotheses`),
-    api(`/incidents/${incidentId}/actions`)
+    api(`/incidents/${incidentId}/actions`),
+    api(`/incidents/${incidentId}/repairs`)
   ]);
 
+  const repairsList = repairs.repairs || [];
   const query = encodeURIComponent([incident.root_cause, incident.title].filter(Boolean).join(" "));
-  const matches = query ? await api(`/memory/search?query=${query}&limit=5`) : { memories: [] };
+  const [matches, repairLifecycle] = await Promise.all([
+    query ? api(`/memory/search?query=${query}&limit=5`) : { memories: [] },
+    loadRepairLifecycle(repairsList)
+  ]);
 
   Object.assign(state.data, {
     incident,
@@ -129,8 +170,25 @@ async function loadIncident(incidentId) {
     evidence: evidence.evidence || [],
     hypotheses: hypotheses.hypotheses || [],
     actions: actions.actions || [],
+    repairs: repairsList,
+    repairLifecycle,
     memoryMatches: matches.memories || []
   });
+}
+
+async function loadRepairLifecycle(repairs) {
+  const entries = await Promise.all(repairs.slice(0, 6).map(async (repair) => {
+    // Older or partially initialized backends may not have lifecycle records yet.
+    const [verification, canary] = await Promise.all([
+      api(`/repairs/${repair.id}/verification-runs`).catch(() => ({ verification_runs: [] })),
+      api(`/repairs/${repair.id}/canary-rollouts`).catch(() => ({ canary_rollouts: [] }))
+    ]);
+    return [repair.id, {
+      verificationRuns: verification.verification_runs || [],
+      canaryRollouts: canary.canary_rollouts || []
+    }];
+  }));
+  return Object.fromEntries(entries);
 }
 
 async function api(path, options = {}) {
@@ -154,11 +212,16 @@ function render() {
   renderSandbox();
   renderScenarios();
   renderIncidents();
+  renderEvaluations();
   renderIncidentHeader();
   renderTimeline();
   renderCollection("evidenceList", state.data.evidence, renderEvidence, "No evidence captured");
   renderCollection("hypothesisList", state.data.hypotheses, renderHypothesis, "No hypotheses generated");
   renderCollection("actionList", state.data.actions, renderAction, "No remediation candidates");
+  renderCollection("repairList", state.data.repairs, renderRepair, "No durable repair plans");
+  renderCollection("ciList", ciChecks(), renderCiRun, "No CI verification runs");
+  renderCollection("canaryList", canaryRollouts(), renderCanary, "No canary rollouts");
+  renderCollection("autonomyList", autonomyDecisions(), renderAutonomy, "No autonomy decisions recorded");
   renderCollection("verificationList", verificationChecks(), renderCheck, "No verification results yet");
   renderCollection("memoryList", memoryMatches(), renderMemory, "No memories stored");
 }
@@ -226,10 +289,26 @@ function renderIncidents() {
   `, "No incidents recorded");
 }
 
+function renderEvaluations() {
+  renderCollection("evaluationList", state.data.evaluations, (run) => {
+    const metrics = run.aggregate_metrics || {};
+    return card(`
+      <div class="row"><strong>${date(run.started_at)}</strong>${pill(run.status)}</div>
+      <p class="muted">${safe((run.scenario_filter || []).join(", ") || "all scenarios")}</p>
+      <div class="mini-grid">
+        <span>Accuracy <strong>${percent(metrics.diagnosis_accuracy)}</strong></span>
+        <span>First action <strong>${percent(metrics.first_action_success_rate)}</strong></span>
+        <span>Cases <strong>${safe(metrics.case_count ?? 0)}</strong></span>
+      </div>
+    `);
+  }, "No evaluation runs");
+}
+
 function renderIncidentHeader() {
   const incident = state.data.incident;
   dom.executeSelected.disabled = !incident;
   dom.analyzeIncident.disabled = !incident;
+  dom.planRepair.disabled = !incident;
   if (!incident) return setHtml("incidentHeader", `<h2>Incident State</h2>${empty("Select or create an incident")}`);
 
   setHtml("incidentHeader", `
@@ -274,19 +353,83 @@ function renderHypothesis(hypothesis) {
 }
 
 function renderAction(action) {
-  const approval = action.requires_approval ? `<button type="button" data-action-approve="${action.id}">Approve</button>` : "";
-  const rejection = action.status === "rejected" ? "" : `<button class="danger" type="button" data-action-reject="${action.id}">Reject</button>`;
   const guardrail = action.requires_approval ? "approval required" : riskLabel(action.risk_score);
+  const autonomy = action.result?.execution?.autonomy;
+  const controls = [
+    actionButton("Execute", "action-execute", action.id),
+    action.requires_approval ? actionButton("Approve", "action-approve", action.id) : "",
+    action.status === "rejected" ? "" : actionButton("Reject", "action-reject", action.id, "danger")
+  ].join("");
 
   return card(`
     <div class="row"><strong>${safe(labelize(action.action_type))}</strong>${pill(action.status)}</div>
     <p class="muted">Risk ${Number(action.risk_score || 0).toFixed(2)} · ${safe(guardrail)}</p>
+    ${autonomy ? `<p class="muted">Policy: ${safe(autonomy.decision)} · ${safe((autonomy.reasons || []).join("; "))}</p>` : ""}
     ${summary(action.params)}
-    <div class="action-controls">
-      <button type="button" data-action-execute="${action.id}">Execute</button>
-      ${approval}
-      ${rejection}
+    <div class="action-controls">${controls}</div>
+  `);
+}
+
+function renderRepair(repair) {
+  const plan = repair.result?.plan || {};
+  const lifecycle = state.data.repairLifecycle?.[repair.id] || {};
+  const controls = [
+    repair.requires_approval ? actionButton("Approve", "repair-approve", repair.id) : "",
+    actionButton("Apply", "repair-apply", repair.id),
+    actionButton("Verify", "repair-verify", repair.id),
+    actionButton("Canary", "repair-canary", repair.id),
+    actionButton("Reject", "repair-reject", repair.id, "danger")
+  ].join("");
+
+  return card(`
+    <div class="row"><strong>${safe(repair.patch_summary || plan.patch_summary || repair.change_type)}</strong>${pill(repair.status)}</div>
+    <p class="muted">${safe(repair.change_type)} · Risk ${Number(repair.risk_score || 0).toFixed(2)} · ${safe((repair.affected_paths || []).join(", ") || "no paths")}</p>
+    ${renderPolicyLine(repair.result?.autonomy)}
+    ${summary({ verification_plan: repair.verification_plan, rollback_plan: repair.rollback_plan })}
+    <div class="mini-grid">
+      <span>CI runs <strong>${safe((lifecycle.verificationRuns || []).length)}</strong></span>
+      <span>Canaries <strong>${safe((lifecycle.canaryRollouts || []).length)}</strong></span>
     </div>
+    <div class="action-controls">${controls}</div>
+  `);
+}
+
+function renderCiRun(run) {
+  const checks = run.checks || [];
+  return card(`
+    <div class="row"><strong>${safe(run.runner || "bounded verifier")}</strong>${pill(run.status)}</div>
+    <p class="muted">${date(run.started_at)} · ${checks.filter((check) => check.passed).length}/${checks.length} passed</p>
+    ${checks.slice(0, 5).map((check) => `<p class="muted">${safe(check.name)}: ${safe(check.status || (check.passed ? "passed" : "failed"))}</p>`).join("")}
+  `);
+}
+
+function renderCanary(rollout) {
+  const signals = rollout.health_signals || {};
+  const controls = [
+    actionButton("Promote", "rollout-promote", rollout.id),
+    actionButton("Quarantine", "rollout-quarantine", rollout.id),
+    actionButton("Rollback", "rollout-rollback", rollout.id, "danger")
+  ].join("");
+
+  return card(`
+    <div class="row"><strong>${safe(rollout.target_environment || "canary")}</strong>${pill(rollout.status)}</div>
+    <p class="muted">${safe(rollout.traffic_percentage)}% traffic · decision ${safe(rollout.decision || "pending")}</p>
+    ${renderPolicyLine(signals.autonomy)}
+    <div class="mini-grid">
+      <span>Passed <strong>${safe(signals.passed ?? 0)}</strong></span>
+      <span>Failed <strong>${safe(signals.failed ?? 0)}</strong></span>
+      <span>Error <strong>${percent(signals.error_rate)}</strong></span>
+    </div>
+    <div class="action-controls">${controls}</div>
+  `);
+}
+
+function renderAutonomy(decision) {
+  return card(`
+    <div class="row"><strong>${safe(decision.source)}</strong>${pill(decision.decision)}</div>
+    <p class="muted">Risk ${Number(decision.risk_score || 0).toFixed(2)} · ${safe(decision.blast_radius || "unknown")} blast radius</p>
+    <p>${safe((decision.reasons || []).join("; ") || "No reasons recorded")}</p>
+    ${(decision.requirements || []).length ? `<p class="muted">Requires ${safe(decision.requirements.join(", "))}</p>` : ""}
   `);
 }
 
@@ -301,12 +444,16 @@ function renderCheck(check) {
 }
 
 function renderMemory(memory) {
+  const action = memory.successful_action || {};
+  const symptoms = memory.symptoms || [];
   return card(`
     <div class="row">
       <strong>${safe(memory.root_cause || "Stored incident")}</strong>
       ${memory.similarity_score !== undefined ? score(memory.similarity_score) : ""}
     </div>
     <p>${safe(memory.summary || "No summary")}</p>
+    ${action.action_type ? `<p class="muted">Useful because ${safe(action.action_type)} previously recovered a similar incident.</p>` : ""}
+    ${symptoms.length ? `<p class="muted">${safe(symptoms.slice(0, 2).map((item) => item.summary || item.kind).join(" · "))}</p>` : ""}
     <p class="muted">${date(memory.created_at)}</p>
   `);
 }
@@ -332,6 +479,34 @@ function verificationChecks() {
   return (state.data.actions || []).flatMap((action) => action.result?.execution?.verification?.checks || []).slice(-12);
 }
 
+function ciChecks() {
+  return repairLifecycleEntries().flatMap((entry) => entry.verificationRuns || []);
+}
+
+function canaryRollouts() {
+  return repairLifecycleEntries().flatMap((entry) => entry.canaryRollouts || []);
+}
+
+function autonomyDecisions() {
+  const actions = (state.data.actions || []).flatMap((action) => [
+    withSource(action.result?.execution?.autonomy, `Action ${labelize(action.action_type)}`)
+  ]);
+  const repairs = (state.data.repairs || []).flatMap((repair) => [
+    withSource(repair.result?.autonomy, `Repair ${repair.change_type}`),
+    withSource(repair.result?.ci_cd?.autonomy, "CI/CD verification"),
+    withSource(repair.result?.canary?.health_signals?.autonomy, "Canary rollout")
+  ]);
+  return [...actions, ...repairs].filter(Boolean);
+}
+
+function repairLifecycleEntries() {
+  return Object.values(state.data.repairLifecycle || {});
+}
+
+function withSource(decision, source) {
+  return decision ? { source, ...decision } : null;
+}
+
 function memoryMatches() {
   return state.data.memoryMatches?.length ? state.data.memoryMatches : state.data.memories || [];
 }
@@ -348,6 +523,10 @@ function card(content) {
   return `<article class="item">${content}</article>`;
 }
 
+function actionButton(label, dataName, value, className = "") {
+  return `<button ${className ? `class="${className}" ` : ""}type="button" data-${dataName}="${safe(value)}">${label}</button>`;
+}
+
 function empty(text) {
   return `<p class="muted">${safe(text)}</p>`;
 }
@@ -361,6 +540,11 @@ function score(value) {
   return `<span class="pill info">${Math.round(Number(value || 0) * 100)}%</span>`;
 }
 
+function percent(value) {
+  if (value === null || value === undefined) return "n/a";
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
 function riskLabel(value) {
   const risk = Number(value || 0);
   if (risk >= 0.75) return "blocked or approval gated";
@@ -372,6 +556,11 @@ function summary(value) {
   if (!value) return "";
   if (typeof value === "string") return `<p>${safe(value)}</p>`;
   return value.summary || value.message || value.error ? `<p>${safe(value.summary || value.message || value.error)}</p>` : json(value);
+}
+
+function renderPolicyLine(policy) {
+  if (!policy) return "";
+  return `<p class="muted">Policy: ${safe(policy.decision)} · ${safe((policy.reasons || []).join("; "))}</p>`;
 }
 
 function json(value) {
@@ -420,7 +609,7 @@ function hideError() {
 }
 
 function setBusy(busy) {
-  [dom.refresh, dom.runHealth, dom.resetScenarios, dom.analyzeIncident, dom.executeSelected].forEach((button) => {
+  [dom.refresh, dom.runHealth, dom.resetScenarios, dom.analyzeIncident, dom.executeSelected, dom.runEvaluation, dom.planRepair].forEach((button) => {
     button.disabled = busy;
   });
 }

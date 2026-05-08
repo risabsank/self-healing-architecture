@@ -371,6 +371,28 @@ main {
   margin-top: 8px;
 }
 
+.mini-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.mini-grid span {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px;
+}
+
+.mini-grid strong {
+  color: var(--text);
+  display: block;
+  font-size: 14px;
+}
+
 .checks {
   display: grid;
   gap: 6px;
