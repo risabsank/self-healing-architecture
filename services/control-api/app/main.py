@@ -16,6 +16,8 @@ from app.api.routes.scenarios import router as scenarios_router
 from app.cicd import ensure_cicd_schema
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
+from app.core.logging import configure_logging, tracing_middleware
+from app.core.security import auth_middleware
 from app.evaluation import ensure_evaluation_schema
 from app.memory import ensure_memory_schema
 from app.monitoring import monitor_loop
@@ -23,22 +25,43 @@ from app.repair import ensure_repair_schema
 from app.rollout import ensure_rollout_schema
 
 
+SCHEMA_INITIALIZERS = (
+    ensure_memory_schema,
+    ensure_repair_schema,
+    ensure_cicd_schema,
+    ensure_rollout_schema,
+    ensure_evaluation_schema,
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     execute_schema_bootstrap()
-    with open_connection() as conn:
-        ensure_memory_schema(conn)
-        ensure_repair_schema(conn)
-        ensure_cicd_schema(conn)
-        ensure_rollout_schema(conn)
-        ensure_evaluation_schema(conn)
-    monitor_task = asyncio.create_task(
-        monitor_loop(open_connection, settings.monitor_interval_seconds)
-    )
+    ensure_extension_schemas()
+    monitor_task = start_monitor_if_enabled()
     yield
-    monitor_task.cancel()
+    await stop_monitor(monitor_task)
+
+
+def ensure_extension_schemas() -> None:
+    with open_connection() as conn:
+        for initializer in SCHEMA_INITIALIZERS:
+            initializer(conn)
+
+
+def start_monitor_if_enabled() -> asyncio.Task | None:
+    if not settings.run_monitor_in_api:
+        return None
+    return asyncio.create_task(monitor_loop(open_connection, settings.monitor_interval_seconds))
+
+
+async def stop_monitor(task: asyncio.Task | None) -> None:
+    if not task:
+        return
+    task.cancel()
     try:
-        await monitor_task
+        await task
     except asyncio.CancelledError:
         pass
 
@@ -49,6 +72,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.middleware("http")(tracing_middleware)
+app.middleware("http")(auth_middleware)
 
 app.add_middleware(
     CORSMiddleware,

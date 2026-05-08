@@ -2,9 +2,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: self_healing
-      POSTGRES_USER: self_healing
-      POSTGRES_PASSWORD: self_healing
+      POSTGRES_DB: ${POSTGRES_DB:-self_healing}
+      POSTGRES_USER: ${POSTGRES_USER:-self_healing}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-self_healing}
     ports:
       - "5432:5432"
     volumes:
@@ -15,13 +15,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    security_opt:
+      - no-new-privileges:true
 
   target-db:
     image: postgres:16
     environment:
-      POSTGRES_DB: target_app
-      POSTGRES_USER: target_app
-      POSTGRES_PASSWORD: target_app
+      POSTGRES_DB: ${TARGET_POSTGRES_DB:-target_app}
+      POSTGRES_USER: ${TARGET_POSTGRES_USER:-target_app}
+      POSTGRES_PASSWORD: ${TARGET_POSTGRES_PASSWORD:-target_app}
     ports:
       - "5433:5432"
     volumes:
@@ -32,20 +34,30 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    security_opt:
+      - no-new-privileges:true
 
   target-api:
     build:
       context: ../target-app/api
     environment:
       APP_NAME: breakable-target-api
-      DATABASE_URL: postgresql://target_app:target_app@target-db:5432/target_app
+      DATABASE_URL: ${TARGET_DATABASE_URL:-postgresql://target_app:target_app@target-db:5432/target_app}
       REQUIRED_ENV_NAME: TARGET_REQUIRED_SECRET
-      TARGET_REQUIRED_SECRET: runtime-foundation-secret
+      TARGET_REQUIRED_SECRET: ${TARGET_REQUIRED_SECRET:-runtime-foundation-secret}
       FEATURE_CHECKOUT_ENABLED: "true"
     ports:
       - "8001:8001"
     volumes:
-      - ../target-app/api:/app
+      - ../target-app/api:/app:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     depends_on:
       target-db:
         condition: service_healthy
@@ -59,15 +71,55 @@ services:
     build:
       context: ../services/control-api
     environment:
-      DATABASE_URL: postgresql://self_healing:self_healing@postgres:5432/self_healing
+      DATABASE_URL: ${CONTROL_DATABASE_URL:-postgresql://self_healing:self_healing@postgres:5432/self_healing}
       TARGET_API_BASE_URL: http://target-api:8001
-      MONITOR_INTERVAL_SECONDS: "10"
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-10}
+      RUN_MONITOR_IN_API: "false"
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      API_KEYS: ${API_KEYS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REPAIR_REPO_ROOT: /workspace
       REPAIR_APPROVED_PATHS: target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml
     ports:
       - "8000:8000"
     volumes:
       - ../:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    depends_on:
+      postgres:
+        condition: service_healthy
+      target-api:
+        condition: service_started
+
+  control-worker:
+    build:
+      context: ../services/control-api
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: ${CONTROL_DATABASE_URL:-postgresql://self_healing:self_healing@postgres:5432/self_healing}
+      TARGET_API_BASE_URL: http://target-api:8001
+      MONITOR_INTERVAL_SECONDS: ${MONITOR_INTERVAL_SECONDS:-10}
+      RUN_MONITOR_IN_API: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REPAIR_REPO_ROOT: /workspace
+      REPAIR_APPROVED_PATHS: target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml
+    volumes:
+      - ../:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     depends_on:
       postgres:
         condition: service_healthy

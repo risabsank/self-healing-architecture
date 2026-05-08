@@ -1,6 +1,11 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -21,6 +26,16 @@ CREATE TABLE IF NOT EXISTS sandbox_services (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (sandbox_id, service_name)
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
+  snapshot_name TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS health_checks (
@@ -191,17 +206,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
 CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
   ON health_checks (sandbox_id, checked_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_sandbox_snapshots_sandbox_created
+  ON sandbox_snapshots (sandbox_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_runtime_events_sandbox_ts
   ON runtime_events (sandbox_id, ts DESC);
 
 CREATE INDEX IF NOT EXISTS idx_incidents_sandbox_status
   ON incidents (sandbox_id, status);
 
+CREATE INDEX IF NOT EXISTS idx_incidents_detected_at
+  ON incidents (detected_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_incident_events_incident_ts
   ON incident_events (incident_id, ts);
 
+CREATE INDEX IF NOT EXISTS idx_remediation_actions_incident_status
+  ON remediation_actions (incident_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_repair_changes_incident_status
   ON repair_changes (incident_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_verification_runs_repair_status
+  ON verification_runs (repair_change_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_canary_rollouts_repair_status
   ON canary_rollouts (repair_change_id, status);

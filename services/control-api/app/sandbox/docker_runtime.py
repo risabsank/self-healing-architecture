@@ -1,17 +1,22 @@
 from dataclasses import dataclass
 
+from app.sandbox.runtime import RuntimeOperation, common_capabilities, unsupported_snapshot
+
 
 @dataclass(frozen=True)
 class DockerRuntime:
-    """Runtime descriptor for the local Docker Compose sandbox."""
-
-    sandbox_id: str = "local-docker"
     runtime: str = "docker-compose"
 
-    def describe(self) -> dict[str, str]:
+    def describe(self, sandbox_id: str) -> dict:
         return {
-            "sandbox_id": self.sandbox_id,
+            "sandbox_id": sandbox_id,
             "runtime": self.runtime,
             "isolation": "docker-containers",
-            "capability": "runtime-foundation",
+            "capabilities": common_capabilities(snapshot_restore=False),
         }
+
+    def create_snapshot(self, sandbox_id: str, snapshot_name: str) -> RuntimeOperation:
+        return unsupported_snapshot("Docker Compose", "capture", sandbox_id, snapshot_name)
+
+    def restore_snapshot(self, sandbox_id: str, snapshot_name: str) -> RuntimeOperation:
+        return unsupported_snapshot("Docker Compose", "restore", sandbox_id, snapshot_name)

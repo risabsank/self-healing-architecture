@@ -60,7 +60,8 @@ Key technical contributions:
 - **Sandboxed failure environments:** failures happen in live isolated runtimes, not static examples.
 - **Replayable operational traces:** every step of detection, reasoning, mitigation, patch generation, CI validation, rollout, and verification is stored as a timeline.
 - **Evaluation harness:** the system can be tested against repeatable failure scenarios and measured with recovery metrics.
-- **Runtime abstraction:** Docker is the first backend, but the architecture can evolve toward Firecracker/MicroVM isolation.
+- **Production hardening:** the control plane includes API-key auth, structured request logs, trace IDs, migrations, a separate worker process, CI, secret-file support, and hardened local containers.
+- **Runtime abstraction:** Docker is the local backend, while the runtime interface supports Firecracker/MicroVM isolation and snapshot-based recovery through a supervisor API.
 
 ## Preferred Technology Stack
 
@@ -255,8 +256,12 @@ Example routes:
 GET    /health
 POST   /sandboxes
 GET    /sandboxes/{sandbox_id}
+GET    /sandboxes/runtimes
 GET    /sandboxes/{sandbox_id}/health-history
 GET    /sandboxes/{sandbox_id}/timeline
+GET    /sandboxes/{sandbox_id}/snapshots
+POST   /sandboxes/{sandbox_id}/snapshots
+POST   /sandboxes/{sandbox_id}/snapshots/{snapshot_name}/restore
 GET    /sandboxes/{sandbox_id}/scenarios
 POST   /sandboxes/{sandbox_id}/scenarios/{scenario_name}/activate
 POST   /sandboxes/{sandbox_id}/scenarios/{scenario_name}/deactivate
@@ -308,6 +313,8 @@ GET    /evaluations/{run_id}/cases
 GET    /events
 GET    /events/stream
 ```
+
+Production-oriented deployments can enable API-key authentication with `AUTH_ENABLED=true` and `API_KEYS` or `API_KEYS_FILE`. See `docs/production-hardening.md` for the worker, migration, tracing, secrets, CI, and runtime isolation model.
 
 ### Incident Agent
 

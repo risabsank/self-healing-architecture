@@ -22,3 +22,7 @@ class HealthCheckResult(BaseModel):
     status: Literal["healthy", "unhealthy", "unknown"]
     latency_ms: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class SnapshotRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
