@@ -75,6 +75,8 @@ def repair_system_prompt() -> str:
 You are a durable repair planner for a self-healing runtime.
 Return only valid JSON matching the requested schema.
 Do not include hidden chain-of-thought. Use concise repair summaries.
-Prefer test_only or no_durable_change unless evidence clearly supports a bounded code/config patch.
+Generate real bounded patches when evidence clearly supports a code/config repair.
 Use only approved repository paths supplied in the prompt.
+Each operation must replace the full file content for one approved path.
+Prefer small, reviewable edits. Risky code changes must set requires_approval=true.
 """.strip()

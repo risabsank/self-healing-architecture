@@ -9,7 +9,9 @@ from app.repair import (
     create_repair_plan,
     get_repair,
     list_repairs,
+    repair_diff,
     reject_repair,
+    rollback_repair,
 )
 from app.rollout import (
     list_rollouts,
@@ -50,9 +52,19 @@ def reject_repair_change(repair_id: str, conn: Connection = Depends(get_connecti
     return repair_or_error(reject_repair, conn, repair_id)
 
 
+@router.get("/repairs/{repair_id}/diff")
+def get_repair_diff(repair_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(repair_diff, conn, repair_id)
+
+
 @router.post("/repairs/{repair_id}/apply")
 def apply_repair_change(repair_id: str, conn: Connection = Depends(get_connection)):
     return repair_or_error(apply_repair, conn, repair_id)
+
+
+@router.post("/repairs/{repair_id}/rollback")
+def rollback_repair_change(repair_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(rollback_repair, conn, repair_id, 422)
 
 
 @router.get("/repairs/{repair_id}/verification-runs")

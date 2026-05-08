@@ -80,6 +80,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REPAIR_REPO_ROOT: /workspace
       REPAIR_APPROVED_PATHS: target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml
+      REPAIR_PATH_OWNERS: target-app/api/main.py:target-api,target-app/api/tests/:target-api-tests,target-app/api/requirements.txt:target-api,infra/docker-compose.yml:platform-runtime
     ports:
       - "8000:8000"
     volumes:
@@ -110,6 +111,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REPAIR_REPO_ROOT: /workspace
       REPAIR_APPROVED_PATHS: target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml
+      REPAIR_PATH_OWNERS: target-app/api/main.py:target-api,target-app/api/tests/:target-api-tests,target-app/api/requirements.txt:target-api,infra/docker-compose.yml:platform-runtime
     volumes:
       - ../:/workspace
     read_only: true

@@ -45,6 +45,11 @@ class LLMIncidentDecision(BaseModel):
     mitigations: list[MitigationCandidate]
 
 
+class LLMPatchOperation(BaseModel):
+    path: str
+    content: str
+
+
 class LLMRepairDecision(BaseModel):
     change_type: Literal["code_patch", "config_patch", "test_only", "no_durable_change"]
     patch_summary: str
@@ -53,3 +58,4 @@ class LLMRepairDecision(BaseModel):
     requires_approval: bool
     verification_plan: list[str]
     rollback_plan: str
+    operations: list[LLMPatchOperation] = Field(default_factory=list)

@@ -22,6 +22,7 @@ def repair_prompt_payload(conn: Connection, incident: dict[str, Any], approved_p
         "task": "Plan a bounded durable repair for this incident.",
         "output_schema": LLMRepairDecision.model_json_schema(),
         "approved_paths": approved_paths,
+        "file_context": load_file_context(approved_paths),
         "incident": {
             "id": incident_id,
             "title": incident.get("title"),
@@ -61,3 +62,14 @@ def load_actions(conn: Connection, incident_id: str) -> list[dict[str, Any]]:
             (incident_id,),
         )
         return cur.fetchall()
+
+
+def load_file_context(approved_paths: list[str]) -> list[dict[str, Any]]:
+    from app.patching import read_approved_file
+
+    context = []
+    for path in approved_paths:
+        content = read_approved_file(path)
+        if content is not None and len(content) <= 12000:
+            context.append({"path": path, "content": content})
+    return context

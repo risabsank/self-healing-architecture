@@ -1,5 +1,3 @@
-import hashlib
-from pathlib import Path
 from typing import Any, Literal
 
 from psycopg import Connection
@@ -9,6 +7,17 @@ from pydantic import BaseModel, Field
 from app.agents.repair_llm import plan_repair_with_claude
 from app.core.config import settings
 from app.observability import record_incident_event
+from app.patching import (
+    PatchOperation,
+    apply_operations,
+    approved_paths,
+    build_patch_set,
+    ensure_operations_are_allowed,
+    path_ownership,
+    read_approved_file,
+    repo_root,
+    rollback_operations,
+)
 from app.policy import PolicyDecision, evaluate_policy
 
 
@@ -22,15 +31,11 @@ RepairStatus = Literal[
     "verified",
     "verification_failed",
     "released",
+    "rolled_back",
 ]
 REGRESSION_TEST_PATH = "target-app/api/tests/test_runtime_regressions.py"
+TARGET_API_PATH = "target-app/api/main.py"
 DEFAULT_TEST_COMMAND = "python -m unittest discover target-app/api/tests"
-
-
-class PatchOperation(BaseModel):
-    path: str
-    content: str
-    mode: Literal["create_or_replace"] = "create_or_replace"
 
 
 class RepairPlan(BaseModel):
@@ -95,6 +100,63 @@ REGRESSION_TESTS = {
 }
 
 
+CODE_PATCH_RULES = [
+    {
+        "tokens": ("feature flag", "checkout"),
+        "summary": "Make the checkout feature flag failure degrade safely instead of returning a 500.",
+        "old": """    if "bad_feature_flag" in ACTIVE_SCENARIOS:
+        raise HTTPException(status_code=500, detail="simulated feature flag failure in checkout path")
+""",
+        "new": """    if "bad_feature_flag" in ACTIVE_SCENARIOS:
+        return {"status": "disabled", "reason": "feature flag isolated by durable repair"}
+""",
+        "test_body": '''    def test_bad_feature_flag_degrades_without_500(self):
+        main.ACTIVE_SCENARIOS.add("bad_feature_flag")
+
+        body = main.checkout_probe()
+
+        self.assertEqual(body, {"status": "disabled", "reason": "feature flag isolated by durable repair"})
+''',
+    },
+    {
+        "tokens": ("dependency", "unavailable"),
+        "summary": "Make checkout dependency outages return a bounded degraded response.",
+        "old": """    if "dependency_unavailable" in ACTIVE_SCENARIOS:
+        raise HTTPException(status_code=503, detail="simulated downstream dependency unavailable")
+""",
+        "new": """    if "dependency_unavailable" in ACTIVE_SCENARIOS:
+        return {"status": "degraded", "dependency": "checkout", "reason": "downstream dependency unavailable"}
+""",
+        "test_body": '''    def test_dependency_unavailable_degrades_without_exception(self):
+        main.ACTIVE_SCENARIOS.add("dependency_unavailable")
+
+        body = main.checkout_probe()
+
+        self.assertEqual(body["status"], "degraded")
+        self.assertEqual(body["dependency"], "checkout")
+''',
+    },
+    {
+        "tokens": ("rate limit", "rate-limit"),
+        "summary": "Make checkout rate limits produce a retryable degraded response.",
+        "old": """    if "rate_limit" in ACTIVE_SCENARIOS:
+        raise HTTPException(status_code=429, detail="simulated dependency rate limit")
+""",
+        "new": """    if "rate_limit" in ACTIVE_SCENARIOS:
+        return {"status": "degraded", "dependency": "checkout", "retryable": True, "reason": "dependency rate limit"}
+""",
+        "test_body": '''    def test_rate_limit_returns_retryable_degraded_response(self):
+        main.ACTIVE_SCENARIOS.add("rate_limit")
+
+        body = main.checkout_probe()
+
+        self.assertEqual(body["status"], "degraded")
+        self.assertTrue(body["retryable"])
+''',
+    },
+]
+
+
 def ensure_repair_schema(conn: Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
@@ -131,7 +193,7 @@ def ensure_repair_schema(conn: Connection) -> None:
 def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
     incident = load_incident(conn, incident_id)
     plan = plan_from_incident(conn, incident)
-    ensure_operations_are_allowed(plan.operations)
+    result = repair_result(plan)
     policy = evaluate_repair_policy(plan)
     status = repair_status_for(policy)
 
@@ -155,11 +217,7 @@ def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
                 plan.requires_approval or policy.decision == "approval_required",
                 Jsonb(plan.verification_plan),
                 plan.rollback_plan,
-                Jsonb({
-                    "plan": plan.model_dump(),
-                    "approved_paths": approved_paths(),
-                    "autonomy": policy.model_dump(),
-                }),
+                Jsonb({**result, "autonomy": policy.model_dump()}),
             ),
         )
         repair = cur.fetchone()
@@ -197,6 +255,15 @@ def reject_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     return update_repair_status(conn, repair_id, "rejected", "repair.rejected")
 
 
+def repair_diff(conn: Connection, repair_id: str) -> dict[str, Any]:
+    repair = require_repair(conn, repair_id)
+    result = repair_result_view(repair)
+    return {
+        "repair_change_id": str(repair["id"]),
+        **result,
+    }
+
+
 def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     repair = require_repair(conn, repair_id)
     block_reason = repair_block_reason(repair)
@@ -205,15 +272,43 @@ def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
 
     plan = RepairPlan.model_validate(repair["result"]["plan"])
     updated = finish_repair(conn, repair, "patch_applied", "repair.patch_applied", {
-        "applied": apply_operations(plan.operations)
+        "applied": apply_operations(plan.operations),
+        "rollback_preview": build_patch_set(rollback_operations(repair))["patch_preview"],
     })
     incident = load_incident(conn, str(updated["incident_id"]))
     update_incident_memory(conn, str(incident["id"]))
     return updated
 
 
+def rollback_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
+    repair = require_repair(conn, repair_id)
+    if repair["status"] not in {"patch_applied", "verification_failed"}:
+        raise ValueError(f"Repair status does not allow rollback: {repair['status']}")
+    applied = apply_operations(rollback_operations(repair))
+    return finish_repair(conn, repair, "rolled_back", "repair.rolled_back", {"rollback_applied": applied})
+
+
 def plan_from_incident(conn: Connection, incident: dict[str, Any]) -> RepairPlan:
     return llm_repair_plan(conn, incident) or deterministic_plan_from_incident(incident)
+
+
+def repair_result(plan: RepairPlan) -> dict[str, Any]:
+    ensure_operations_are_allowed(plan.operations)
+    return {
+        "plan": plan.model_dump(),
+        **build_patch_set(plan.operations),
+        "approved_paths": approved_paths(),
+        "path_ownership": path_ownership(plan.operations),
+    }
+
+
+def repair_result_view(repair: dict[str, Any]) -> dict[str, Any]:
+    result = repair["result"] or {}
+    return {
+        "patch_preview": result.get("patch_preview", []),
+        "rollback_preview": result.get("rollback_preview", []),
+        "path_ownership": result.get("path_ownership", []),
+    }
 
 
 def llm_repair_plan(conn: Connection, incident: dict[str, Any]) -> RepairPlan | None:
@@ -221,13 +316,17 @@ def llm_repair_plan(conn: Connection, incident: dict[str, Any]) -> RepairPlan | 
         return None
     try:
         decision = plan_repair_with_claude(conn, incident, approved_paths())
-        return RepairPlan(**decision.model_dump(), operations=[])
+        return RepairPlan.model_validate(decision.model_dump())
     except Exception:
         return None
 
 
 def deterministic_plan_from_incident(incident: dict[str, Any]) -> RepairPlan:
     root_cause = (incident.get("root_cause") or incident.get("title") or "").lower()
+
+    code_plan = code_patch_plan(root_cause)
+    if code_plan:
+        return code_plan
 
     for rule in REPAIR_RULES:
         if any(token in root_cause for token in rule["tokens"]):
@@ -245,6 +344,34 @@ def deterministic_plan_from_incident(incident: dict[str, Any]) -> RepairPlan:
     )
 
 
+def code_patch_plan(root_cause: str) -> RepairPlan | None:
+    current = read_approved_file(TARGET_API_PATH)
+    if current is None:
+        return None
+
+    for rule in CODE_PATCH_RULES:
+        if not any(token in root_cause for token in rule["tokens"]):
+            continue
+        next_content = current.replace(rule["old"], rule["new"])
+        if next_content == current:
+            return None
+        return RepairPlan(
+            change_type="code_patch",
+            patch_summary=rule["summary"],
+            affected_paths=[TARGET_API_PATH, REGRESSION_TEST_PATH],
+            risk_score=0.62,
+            requires_approval=True,
+            verification_plan=[DEFAULT_TEST_COMMAND, "review generated diff before applying"],
+            rollback_plan="Apply the generated rollback patch to restore the previous file contents.",
+            operations=[
+                PatchOperation(path=TARGET_API_PATH, content=next_content),
+                PatchOperation(path=REGRESSION_TEST_PATH, content=regression_test_content(rule["test_body"])),
+            ],
+        )
+
+    return None
+
+
 def regression_plan(
     summary: str,
     test_body: str,
@@ -258,63 +385,8 @@ def regression_plan(
         requires_approval=False,
         verification_plan=[DEFAULT_TEST_COMMAND, verification],
         rollback_plan=f"Remove or revert {REGRESSION_TEST_PATH}.",
-        operations=[PatchOperation(path=REGRESSION_TEST_PATH, content=regression_test_file(test_body))],
+        operations=[PatchOperation(path=REGRESSION_TEST_PATH, content=regression_test_content(test_body))],
     )
-
-
-def apply_operations(operations: list[PatchOperation]) -> list[dict[str, Any]]:
-    # This is the durable-repair safety boundary: only approved relative paths
-    # are resolved, created, and written.
-    ensure_operations_are_allowed(operations)
-    applied = []
-    for operation in operations:
-        target = resolve_repo_path(operation.path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        previous = target.read_text() if target.exists() else None
-        target.write_text(operation.content)
-        applied.append({
-            "path": operation.path,
-            "mode": operation.mode,
-            "previous_sha256": sha256_text(previous),
-            "new_sha256": sha256_text(operation.content),
-        })
-    return applied
-
-
-def ensure_operations_are_allowed(operations: list[PatchOperation]) -> None:
-    for operation in operations:
-        if not is_approved_path(operation.path):
-            raise ValueError(f"Repair operation is outside approved paths: {operation.path}")
-
-
-def is_approved_path(path: str) -> bool:
-    normalized = normalize_relative(path)
-    return any(normalized == approved or normalized.startswith(f"{approved}/") for approved in approved_paths())
-
-
-def approved_paths() -> list[str]:
-    return [normalize_relative(path) for path in settings.repair_approved_paths.split(",") if path.strip()]
-
-
-def resolve_repo_path(path: str) -> Path:
-    relative = normalize_relative(path)
-    root = repo_root().resolve()
-    target = (root / relative).resolve()
-    if root not in target.parents and target != root:
-        raise ValueError(f"Repair path escapes repository root: {path}")
-    return target
-
-
-def normalize_relative(path: str) -> str:
-    normalized = Path(path.strip()).as_posix().lstrip("/")
-    if normalized.startswith("../") or "/../" in normalized:
-        raise ValueError(f"Repair path may not contain parent traversal: {path}")
-    return normalized
-
-
-def repo_root() -> Path:
-    configured = Path(settings.repair_repo_root)
-    return configured if configured.exists() else Path(__file__).resolve().parents[3]
 
 
 def load_incident(conn: Connection, incident_id: str) -> dict[str, Any]:
@@ -419,6 +491,21 @@ def update_incident_memory(conn: Connection, incident_id: str) -> None:
     conn.commit()
 
 
+def regression_test_content(test_body: str) -> str:
+    current = read_approved_file(REGRESSION_TEST_PATH)
+    if not current:
+        return regression_test_file(test_body)
+
+    signature = test_body.strip().splitlines()[0].strip()
+    if signature in current:
+        return current
+
+    marker = '\n\nif __name__ == "__main__":'
+    if marker not in current:
+        return regression_test_file(test_body)
+    return current.replace(marker, f"\n{test_body}{marker}")
+
+
 def regression_test_file(test_body: str) -> str:
     return f'''"""Regression tests generated by the durable repair agent."""
 
@@ -441,9 +528,3 @@ class RuntimeRegressionTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 '''
-
-
-def sha256_text(text: str | None) -> str | None:
-    if text is None:
-        return None
-    return hashlib.sha256(text.encode()).hexdigest()

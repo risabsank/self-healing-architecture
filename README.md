@@ -285,9 +285,11 @@ POST   /incidents/{incident_id}/actions/execute-selected
 GET    /incidents/{incident_id}/repairs
 POST   /incidents/{incident_id}/repairs/plan
 GET    /repairs/{repair_id}
+GET    /repairs/{repair_id}/diff
 POST   /repairs/{repair_id}/approve
 POST   /repairs/{repair_id}/reject
 POST   /repairs/{repair_id}/apply
+POST   /repairs/{repair_id}/rollback
 GET    /repairs/{repair_id}/verification-runs
 POST   /repairs/{repair_id}/verify
 GET    /repairs/{repair_id}/canary-rollouts
@@ -347,6 +349,8 @@ detect_failure
 
 The repair agent handles durable improvements after immediate service recovery. It does not freely edit arbitrary files. It receives a bounded repair request with an incident summary, evidence, affected component, allowed write paths, test commands, rollback strategy, and deployment policy.
 
+Repair plans include concrete full-file patch operations, a unified diff preview, path ownership metadata, rollback operations, and a policy decision. Risky code changes are approval-gated before application, while lower-risk test or configuration repairs can remain eligible for autonomous handling when policy allows it.
+
 Repair requests should produce typed objects:
 
 ```json
@@ -358,6 +362,13 @@ Repair requests should produce typed objects:
     "target-app/api/tests/"
   ],
   "patch_summary": "Add defensive database connection handling and regression coverage for unavailable database hosts.",
+  "patch_preview": [
+    {
+      "path": "target-app/api/main.py",
+      "owner": "target-api",
+      "diff": "--- a/target-app/api/main.py\n+++ b/target-app/api/main.py\n..."
+    }
+  ],
   "risk_score": 0.34,
   "requires_approval": false,
   "verification_plan": [

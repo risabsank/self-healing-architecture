@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     default_sandbox_id: str = "local-docker"
     repair_repo_root: str = "/workspace"
     repair_approved_paths: str = "target-app/api/tests/,target-app/api/main.py,target-app/api/requirements.txt,infra/docker-compose.yml"
+    repair_path_owners: str = "target-app/api/main.py:target-api, target-app/api/tests/:target-api-tests, target-app/api/requirements.txt:target-api, infra/docker-compose.yml:platform-runtime"
     auth_enabled: bool = False
     api_keys: str = ""
     log_level: str = "INFO"

@@ -59,6 +59,7 @@ const DATASET_ACTIONS = {
   repairApply: (id) => mutate(`/repairs/${id}/apply`),
   repairVerify: (id) => mutate(`/repairs/${id}/verify`),
   repairCanary: (id) => mutate(`/repairs/${id}/canary-rollouts/start`),
+  repairRollback: (id) => mutate(`/repairs/${id}/rollback`),
   rolloutPromote: (id) => mutate(`/canary-rollouts/${id}/promote`),
   rolloutRollback: (id) => mutate(`/canary-rollouts/${id}/rollback`),
   rolloutQuarantine: (id) => mutate(`/canary-rollouts/${id}/quarantine`)
@@ -372,26 +373,42 @@ function renderAction(action) {
 
 function renderRepair(repair) {
   const plan = repair.result?.plan || {};
-  const lifecycle = state.data.repairLifecycle?.[repair.id] || {};
-  const controls = [
-    repair.requires_approval ? actionButton("Approve", "repair-approve", repair.id) : "",
-    actionButton("Apply", "repair-apply", repair.id),
-    actionButton("Verify", "repair-verify", repair.id),
-    actionButton("Canary", "repair-canary", repair.id),
-    actionButton("Reject", "repair-reject", repair.id, "danger")
-  ].join("");
 
   return card(`
     <div class="row"><strong>${safe(repair.patch_summary || plan.patch_summary || repair.change_type)}</strong>${pill(repair.status)}</div>
     <p class="muted">${safe(repair.change_type)} · Risk ${Number(repair.risk_score || 0).toFixed(2)} · ${safe((repair.affected_paths || []).join(", ") || "no paths")}</p>
     ${renderPolicyLine(repair.result?.autonomy)}
+    ${renderOwnership(repair.result?.path_ownership || [])}
     ${summary({ verification_plan: repair.verification_plan, rollback_plan: repair.rollback_plan })}
+    ${renderDiffPreview(repair.result?.patch_preview || [])}
+    ${renderRepairLifecycle(repair)}
+    <div class="action-controls">${repairControls(repair)}</div>
+  `);
+}
+
+function repairControls(repair) {
+  return [
+    repair.requires_approval ? actionButton("Approve", "repair-approve", repair.id) : "",
+    actionButton("Apply", "repair-apply", repair.id),
+    actionButton("Verify", "repair-verify", repair.id),
+    actionButton("Canary", "repair-canary", repair.id),
+    canRollbackRepair(repair) ? actionButton("Rollback", "repair-rollback", repair.id, "danger") : "",
+    actionButton("Reject", "repair-reject", repair.id, "danger")
+  ].join("");
+}
+
+function renderRepairLifecycle(repair) {
+  const lifecycle = state.data.repairLifecycle?.[repair.id] || {};
+  return `
     <div class="mini-grid">
       <span>CI runs <strong>${safe((lifecycle.verificationRuns || []).length)}</strong></span>
       <span>Canaries <strong>${safe((lifecycle.canaryRollouts || []).length)}</strong></span>
     </div>
-    <div class="action-controls">${controls}</div>
-  `);
+  `;
+}
+
+function canRollbackRepair(repair) {
+  return ["patch_applied", "verification_failed"].includes(repair.status);
 }
 
 function renderCiRun(run) {
@@ -431,6 +448,21 @@ function renderAutonomy(decision) {
     <p>${safe((decision.reasons || []).join("; ") || "No reasons recorded")}</p>
     ${(decision.requirements || []).length ? `<p class="muted">Requires ${safe(decision.requirements.join(", "))}</p>` : ""}
   `);
+}
+
+function renderOwnership(records) {
+  if (!records.length) return "";
+  return `<p class="muted">Owners: ${safe(records.map((record) => `${record.path} -> ${record.owner}`).join("; "))}</p>`;
+}
+
+function renderDiffPreview(previews) {
+  if (!previews.length) return "";
+  return previews.map((preview) => `
+    <details class="diff-preview">
+      <summary>${safe(preview.path)} · ${safe(preview.owner || "unowned")}</summary>
+      <pre class="json">${safe(preview.diff || "No textual diff")}</pre>
+    </details>
+  `).join("");
 }
 
 function renderCheck(check) {

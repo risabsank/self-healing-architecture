@@ -364,6 +364,16 @@ main {
   word-break: break-word;
 }
 
+.diff-preview {
+  margin-top: 8px;
+}
+
+.diff-preview summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .action-controls {
   display: flex;
   flex-wrap: wrap;
