@@ -300,6 +300,11 @@ POST   /releases/{release_id}/rollback
 GET    /memory/incidents
 GET    /memory/search?query=database
 
+POST   /evaluations/run
+GET    /evaluations
+GET    /evaluations/{run_id}
+GET    /evaluations/{run_id}/cases
+
 GET    /events
 GET    /events/stream
 ```
@@ -569,6 +574,45 @@ Example rollout decision:
 }
 ```
 
+## Evaluation Harness
+
+The evaluation harness runs the full incident-response loop against repeatable failure scenarios. It injects a scenario, waits for detection, invokes the incident agent, executes the selected bounded mitigation, verifies recovery, and stores metrics for each case.
+
+Tracked metrics include:
+
+- detection time,
+- diagnosis accuracy,
+- recovery time,
+- first-action success rate,
+- rollback rate,
+- memory usefulness.
+
+Run the default scenario catalog:
+
+```bash
+curl -X POST http://localhost:8000/evaluations/run \
+  -H 'Content-Type: application/json' \
+  -d '{"repeats": 1}'
+```
+
+Run a focused subset:
+
+```bash
+curl -X POST http://localhost:8000/evaluations/run \
+  -H 'Content-Type: application/json' \
+  -d '{"scenarios": ["bad_database_url", "bad_feature_flag"], "repeats": 2}'
+```
+
+Evaluation runs and cases are persisted:
+
+```text
+GET /evaluations
+GET /evaluations/{run_id}
+GET /evaluations/{run_id}/cases
+```
+
+See `docs/evaluation-harness.md` for the scenario catalog and metric definitions.
+
 ## Autonomy Model
 
 The system should make many operational decisions autonomously, but autonomy must be scoped by policy, evidence, and reversibility.
@@ -722,6 +766,33 @@ CREATE TABLE incident_memories (
   rollout_result JSONB,
   embedding vector(1536),
   created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE evaluation_runs (
+  id UUID PRIMARY KEY,
+  status TEXT NOT NULL,
+  scenario_filter JSONB NOT NULL,
+  repeats INTEGER NOT NULL,
+  aggregate_metrics JSONB NOT NULL,
+  result JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE evaluation_cases (
+  id UUID PRIMARY KEY,
+  run_id UUID REFERENCES evaluation_runs(id),
+  scenario_name TEXT NOT NULL,
+  iteration INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  incident_id UUID REFERENCES incidents(id),
+  expected_root_cause TEXT NOT NULL,
+  diagnosed_root_cause TEXT,
+  selected_action TEXT,
+  metrics JSONB NOT NULL,
+  result JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
 );
 ```
 

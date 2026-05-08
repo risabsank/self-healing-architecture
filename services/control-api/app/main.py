@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.actions import router as actions_router
+from app.api.routes.evaluations import router as evaluations_router
 from app.api.routes.health import router as health_router
 from app.api.routes.incidents import router as incidents_router
 from app.api.routes.memory import router as memory_router
@@ -15,6 +16,7 @@ from app.api.routes.scenarios import router as scenarios_router
 from app.cicd import ensure_cicd_schema
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
+from app.evaluation import ensure_evaluation_schema
 from app.memory import ensure_memory_schema
 from app.monitoring import monitor_loop
 from app.repair import ensure_repair_schema
@@ -29,6 +31,7 @@ async def lifespan(app: FastAPI):
         ensure_repair_schema(conn)
         ensure_cicd_schema(conn)
         ensure_rollout_schema(conn)
+        ensure_evaluation_schema(conn)
     monitor_task = asyncio.create_task(
         monitor_loop(open_connection, settings.monitor_interval_seconds)
     )
@@ -65,6 +68,7 @@ app.include_router(observability_router)
 app.include_router(actions_router)
 app.include_router(memory_router)
 app.include_router(repairs_router)
+app.include_router(evaluations_router)
 
 
 @app.get("/")

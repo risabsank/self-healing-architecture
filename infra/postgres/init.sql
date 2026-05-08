@@ -150,6 +150,33 @@ CREATE TABLE IF NOT EXISTS incident_memories (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status TEXT NOT NULL,
+  scenario_filter JSONB NOT NULL DEFAULT '[]'::jsonb,
+  repeats INTEGER NOT NULL,
+  aggregate_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_cases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id UUID REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+  scenario_name TEXT NOT NULL,
+  iteration INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
+  expected_root_cause TEXT NOT NULL,
+  diagnosed_root_cause TEXT,
+  selected_action TEXT,
+  metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
 ALTER TABLE incident_memories
   ADD COLUMN IF NOT EXISTS symptoms JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -178,6 +205,9 @@ CREATE INDEX IF NOT EXISTS idx_repair_changes_incident_status
 
 CREATE INDEX IF NOT EXISTS idx_canary_rollouts_repair_status
   ON canary_rollouts (repair_change_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_evaluation_cases_run_iteration
+  ON evaluation_cases (run_id, iteration, scenario_name);
 
 INSERT INTO sandboxes (id, name, runtime, status, metadata)
 VALUES (
