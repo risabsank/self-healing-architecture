@@ -7,7 +7,7 @@ from app.observability import record_incident_event
 
 MEMORY_SELECT = """
 SELECT id, incident_id, summary, symptoms, root_cause,
-       successful_action, failed_actions, verification_result, repair_change, created_at
+       successful_action, failed_actions, verification_result, repair_change, rollout_result, created_at
 FROM incident_memories
 """
 
@@ -19,6 +19,7 @@ def ensure_memory_schema(conn: Connection) -> None:
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS verification_result JSONB")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS repair_change JSONB")
+        cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS rollout_result JSONB")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
@@ -88,6 +89,18 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
         """,
         (incident_id,),
     )
+    rollout_result = fetch_one(
+        conn,
+        """
+        SELECT id, repair_change_id, status, target_environment, traffic_percentage,
+               health_signals, started_at, completed_at, decision
+        FROM canary_rollouts
+        WHERE repair_change_id = %s
+        ORDER BY completed_at DESC NULLS LAST, started_at DESC
+        LIMIT 1
+        """,
+        (repair_change["id"],) if repair_change else (None,),
+    )
     failed_actions = failed_action_records(actions, failed_events)
     verification = (successful_action or {}).get("result", {}).get("execution", {}).get("verification")
     symptoms = extract_symptoms(evidence)
@@ -98,9 +111,9 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
             """
             INSERT INTO incident_memories (
               incident_id, summary, symptoms, evidence, root_cause,
-              successful_action, failed_actions, verification_result, repair_change
+              successful_action, failed_actions, verification_result, repair_change, rollout_result
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (incident_id) WHERE incident_id IS NOT NULL
             DO UPDATE SET
               summary = EXCLUDED.summary,
@@ -110,8 +123,9 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
               successful_action = EXCLUDED.successful_action,
               failed_actions = EXCLUDED.failed_actions,
               verification_result = EXCLUDED.verification_result,
-              repair_change = EXCLUDED.repair_change
-            RETURNING id, incident_id, summary, symptoms, root_cause, successful_action, failed_actions, verification_result, repair_change, created_at
+              repair_change = EXCLUDED.repair_change,
+              rollout_result = EXCLUDED.rollout_result
+            RETURNING id, incident_id, summary, symptoms, root_cause, successful_action, failed_actions, verification_result, repair_change, rollout_result, created_at
             """,
             (
                 incident_id,
@@ -123,6 +137,7 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
                 Jsonb(failed_actions),
                 Jsonb(verification),
                 Jsonb(serialize_repair_change(repair_change) if repair_change else None),
+                Jsonb(serialize_rollout_result(rollout_result) if rollout_result else None),
             ),
         )
         memory = cur.fetchone()
@@ -178,6 +193,16 @@ def serialize_repair_change(repair: dict[str, Any]) -> dict[str, Any]:
         **repair,
         "id": str(repair["id"]),
         "created_at": repair["created_at"].isoformat() if repair.get("created_at") else None,
+    }
+
+
+def serialize_rollout_result(rollout: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **rollout,
+        "id": str(rollout["id"]),
+        "repair_change_id": str(rollout["repair_change_id"]),
+        "started_at": rollout["started_at"].isoformat() if rollout.get("started_at") else None,
+        "completed_at": rollout["completed_at"].isoformat() if rollout.get("completed_at") else None,
     }
 
 

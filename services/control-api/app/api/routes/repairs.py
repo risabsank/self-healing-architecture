@@ -11,6 +11,13 @@ from app.repair import (
     list_repairs,
     reject_repair,
 )
+from app.rollout import (
+    list_rollouts,
+    promote_rollout,
+    quarantine_rollout,
+    rollback_rollout,
+    start_canary_rollout,
+)
 
 router = APIRouter(tags=["durable-repairs"])
 
@@ -58,8 +65,44 @@ def verify_repair_change(repair_id: str, conn: Connection = Depends(get_connecti
     return repair_or_error(run_verification_pipeline, conn, repair_id, 422)
 
 
+@router.get("/repairs/{repair_id}/canary-rollouts")
+def get_repair_canary_rollouts(repair_id: str, conn: Connection = Depends(get_connection)):
+    return {"canary_rollouts": list_rollouts(conn, repair_id)}
+
+
+@router.post("/repairs/{repair_id}/canary-rollouts/start")
+def start_repair_canary_rollout(
+    repair_id: str,
+    traffic_percentage: float = 10.0,
+    conn: Connection = Depends(get_connection),
+):
+    return rollout_or_error(conn, repair_id, traffic_percentage)
+
+
+@router.post("/canary-rollouts/{rollout_id}/promote")
+def promote_canary(rollout_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(promote_rollout, conn, rollout_id)
+
+
+@router.post("/canary-rollouts/{rollout_id}/rollback")
+def rollback_canary(rollout_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(rollback_rollout, conn, rollout_id)
+
+
+@router.post("/canary-rollouts/{rollout_id}/quarantine")
+def quarantine_canary(rollout_id: str, conn: Connection = Depends(get_connection)):
+    return repair_or_error(quarantine_rollout, conn, rollout_id)
+
+
 def repair_or_error(operation, conn: Connection, identifier: str, status_code: int = 404):
     try:
         return operation(conn, identifier)
     except ValueError as exc:
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+def rollout_or_error(conn: Connection, repair_id: str, traffic_percentage: float):
+    try:
+        return start_canary_rollout(conn, repair_id, traffic_percentage)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

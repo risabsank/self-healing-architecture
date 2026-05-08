@@ -285,6 +285,11 @@ POST   /repairs/{repair_id}/reject
 POST   /repairs/{repair_id}/apply
 GET    /repairs/{repair_id}/verification-runs
 POST   /repairs/{repair_id}/verify
+GET    /repairs/{repair_id}/canary-rollouts
+POST   /repairs/{repair_id}/canary-rollouts/start
+POST   /canary-rollouts/{rollout_id}/promote
+POST   /canary-rollouts/{rollout_id}/rollback
+POST   /canary-rollouts/{rollout_id}/quarantine
 
 GET    /releases
 GET    /releases/{release_id}
