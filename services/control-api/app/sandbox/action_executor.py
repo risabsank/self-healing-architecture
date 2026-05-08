@@ -31,7 +31,7 @@ async def execute_remediation_action(
     params = dict(action["params"] or {})
 
     try:
-        policy = validate_action_policy(
+        action_policy, autonomy = validate_action_policy(
             action["action_type"],
             params,
             float(action["risk_score"]),
@@ -52,7 +52,7 @@ async def execute_remediation_action(
         "executing",
         "mitigation.executing",
         actor,
-        {"params": params, "policy": policy.description},
+        {"params": params, "policy": action_policy.description, "autonomy": autonomy.model_dump()},
         "remediating",
     )
     conn.commit()
@@ -72,7 +72,8 @@ async def execute_remediation_action(
         verification = await verify_recovery(conn, str(incident["id"]), action, service)
         result = {
             "status": "executed",
-            "policy": policy.description,
+            "policy": action_policy.description,
+            "autonomy": autonomy.model_dump(),
             "target_result": target_result,
             "verification": verification,
         }

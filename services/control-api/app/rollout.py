@@ -6,6 +6,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from app.observability import record_incident_event
+from app.policy import PolicyDecision, evaluate_policy
 from app.repair import get_repair, load_incident
 
 
@@ -74,8 +75,13 @@ def get_rollout(conn: Connection, rollout_id: str) -> dict[str, Any] | None:
 
 def start_canary_rollout(conn: Connection, repair_id: str, traffic_percentage: float = 10.0) -> dict[str, Any]:
     repair = require_verified_repair(conn, repair_id)
-    rollout = create_rollout(conn, repair_id, bounded_traffic(traffic_percentage))
-    signals = collect_canary_signals()
+    traffic = bounded_traffic(traffic_percentage)
+    policy = evaluate_rollout_policy(repair, traffic)
+    if policy.decision != "autonomous":
+        raise ValueError(f"Canary rollout is {policy.decision}: {'; '.join(policy.reasons)}")
+
+    rollout = create_rollout(conn, repair_id, traffic, policy)
+    signals = {**collect_canary_signals(), "autonomy": policy.model_dump()}
     completed = finish_rollout(conn, rollout, repair, decide_rollout(signals), signals)
     conn.commit()
     return completed
@@ -102,17 +108,27 @@ def require_verified_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     return repair
 
 
-def create_rollout(conn: Connection, repair_id: str, traffic_percentage: float) -> dict[str, Any]:
+def create_rollout(
+    conn: Connection,
+    repair_id: str,
+    traffic_percentage: float,
+    policy: PolicyDecision,
+) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO canary_rollouts (
               repair_change_id, status, target_environment, traffic_percentage, health_signals
             )
-            VALUES (%s, 'running', %s, %s, '{}'::jsonb)
+            VALUES (%s, 'running', %s, %s, %s)
             RETURNING *
             """,
-            (repair_id, CANARY_ENVIRONMENT, traffic_percentage),
+            (
+                repair_id,
+                CANARY_ENVIRONMENT,
+                traffic_percentage,
+                Jsonb({"autonomy": policy.model_dump()}),
+            ),
         )
         rollout = cur.fetchone()
     conn.commit()
@@ -254,6 +270,19 @@ def update_incident_memory(conn: Connection, incident_id: str) -> None:
 
 def bounded_traffic(value: float) -> float:
     return min(max(float(value), 0.1), 25.0)
+
+
+def evaluate_rollout_policy(repair: dict[str, Any], traffic_percentage: float) -> PolicyDecision:
+    verification = (repair.get("result") or {}).get("ci_cd") or {}
+    return evaluate_policy(
+        capability="canary_rollout",
+        action_type="synthetic_probe_canary",
+        risk_score=min(float(repair["risk_score"]) + traffic_percentage / 100, 1.0),
+        evidence_count=1 if verification.get("status") == "passed" else 0,
+        rollback_available=True,
+        blast_radius="low",
+        max_autonomous_risk=0.5,
+    )
 
 
 def serialize_rollout(rollout: dict[str, Any]) -> dict[str, Any]:

@@ -8,9 +8,20 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.observability import record_incident_event
+from app.policy import PolicyDecision, evaluate_policy
 
 
-RepairStatus = Literal["planned", "approved", "patch_applied", "rejected", "blocked"]
+RepairStatus = Literal[
+    "planned",
+    "awaiting_approval",
+    "approved",
+    "patch_applied",
+    "rejected",
+    "blocked",
+    "verified",
+    "verification_failed",
+    "released",
+]
 REGRESSION_TEST_PATH = "target-app/api/tests/test_runtime_regressions.py"
 DEFAULT_TEST_COMMAND = "python -m unittest discover target-app/api/tests"
 
@@ -120,6 +131,8 @@ def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
     incident = load_incident(conn, incident_id)
     plan = plan_from_incident(incident)
     ensure_operations_are_allowed(plan.operations)
+    policy = evaluate_repair_policy(plan)
+    status = repair_status_for(policy)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -128,19 +141,24 @@ def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
               incident_id, status, change_type, affected_paths, patch_summary,
               risk_score, requires_approval, verification_plan, rollback_plan, result
             )
-            VALUES (%s, 'planned', %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (
                 incident_id,
+                status,
                 plan.change_type,
                 plan.affected_paths,
                 plan.patch_summary,
                 plan.risk_score,
-                plan.requires_approval,
+                plan.requires_approval or policy.decision == "approval_required",
                 Jsonb(plan.verification_plan),
                 plan.rollback_plan,
-                Jsonb({"plan": plan.model_dump(), "approved_paths": approved_paths()}),
+                Jsonb({
+                    "plan": plan.model_dump(),
+                    "approved_paths": approved_paths(),
+                    "autonomy": policy.model_dump(),
+                }),
             ),
         )
         repair = cur.fetchone()
@@ -336,6 +354,27 @@ def repair_block_reason(repair: dict[str, Any]) -> str | None:
     if repair["status"] not in {"planned", "approved"}:
         return f"Repair status does not allow application: {repair['status']}"
     return None
+
+
+def evaluate_repair_policy(plan: RepairPlan) -> PolicyDecision:
+    return evaluate_policy(
+        capability="durable_repair",
+        action_type=plan.change_type,
+        risk_score=plan.risk_score,
+        evidence_count=1,
+        rollback_available=plan.change_type == "no_durable_change" or plan.rollback_plan != "No repository changes were planned.",
+        blast_radius="low" if plan.change_type == "test_only" else "medium",
+        max_autonomous_risk=0.35,
+        approval_required=plan.requires_approval,
+    )
+
+
+def repair_status_for(policy: PolicyDecision) -> RepairStatus:
+    if policy.decision == "blocked":
+        return "blocked"
+    if policy.decision == "approval_required":
+        return "awaiting_approval"
+    return "planned"
 
 
 def record_repair_event(conn: Connection, incident: dict[str, Any], event_type: str, repair: dict[str, Any]) -> None:

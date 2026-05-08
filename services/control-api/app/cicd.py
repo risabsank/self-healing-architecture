@@ -10,6 +10,7 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from app.observability import record_incident_event
+from app.policy import evaluate_policy
 from app.repair import get_repair, load_incident, repo_root
 
 
@@ -89,7 +90,7 @@ def require_verifiable_repair(conn: Connection, repair_id: str) -> dict[str, Any
     repair = get_repair(conn, repair_id)
     if not repair:
         raise ValueError(f"Repair not found: {repair_id}")
-    if repair["status"] not in {"patch_applied", "verified", "verification_failed"}:
+    if repair["status"] not in {"patch_applied", "verified", "verification_failed", "released"}:
         raise ValueError(f"Repair must be patch_applied before verification: {repair['status']}")
     return repair
 
@@ -129,13 +130,16 @@ def update_repair_verification(
     status: str,
     run: dict[str, Any],
 ) -> None:
-    repair_status = "verified" if status == "passed" else "verification_failed"
+    repair_status = "released" if status == "passed" and repair["status"] == "released" else (
+        "verified" if status == "passed" else "verification_failed"
+    )
     result = {
         **(repair["result"] or {}),
         "ci_cd": {
             "status": status,
             "verification_run_id": str(run["id"]),
             "checks": run["checks"],
+            "autonomy": verification_policy(repair, status).model_dump(),
         },
     }
     with conn.cursor() as cur:
@@ -177,6 +181,18 @@ def execute_checks(repair: dict[str, Any]) -> list[dict[str, Any]]:
         integration_health_check(),
         sandbox_replay_check(),
     ]
+
+
+def verification_policy(repair: dict[str, Any], status: str):
+    return evaluate_policy(
+        capability="ci_cd_verification",
+        action_type="bounded_release_gates",
+        risk_score=0.1 if status == "passed" else 0.6,
+        evidence_count=len((repair.get("result") or {}).get("applied") or [repair]),
+        rollback_available=True,
+        blast_radius="low",
+        max_autonomous_risk=0.5,
+    )
 
 
 def run_command_check(name: str, command: list[str], cwd: Path) -> dict[str, Any]:

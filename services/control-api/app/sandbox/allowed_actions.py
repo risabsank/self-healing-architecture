@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.policy import BlastRadius, PolicyDecision, evaluate_policy
+
 
 class ActionPolicyError(ValueError):
     pass
@@ -12,6 +14,8 @@ class AllowedAction:
     description: str
     required_params: tuple[str, ...]
     max_autonomous_risk: float
+    blast_radius: BlastRadius = "low"
+    rollback_available: bool = True
     approval_required: bool = False
 
 
@@ -45,6 +49,7 @@ ALLOWED_ACTIONS: dict[str, AllowedAction] = {
         description="Return runtime configuration to a previous known-good version.",
         required_params=("service", "target"),
         max_autonomous_risk=0.0,
+        blast_radius="medium",
         approval_required=True,
     ),
 }
@@ -67,6 +72,13 @@ ROLLBACK_TARGETS = {
     "previous_known_good_app_version",
 }
 
+PARAM_ALLOWLISTS = {
+    "SET_ENV_VAR": ("key", RESTORABLE_ENV_KEYS, "Environment key is not restorable through this executor"),
+    "DISABLE_FEATURE_FLAG": ("flag", DISABLEABLE_FLAGS, "Feature flag is not managed by this executor"),
+    "SWITCH_DEPENDENCY_TO_MOCK": ("dependency", SWITCHABLE_DEPENDENCIES, "Dependency is not switchable through this executor"),
+    "ROLLBACK_CONFIG": ("target", ROLLBACK_TARGETS, "Rollback target is not allowlisted"),
+}
+
 
 def list_allowed_actions() -> list[dict[str, Any]]:
     return [
@@ -75,6 +87,8 @@ def list_allowed_actions() -> list[dict[str, Any]]:
             "description": action.description,
             "required_params": list(action.required_params),
             "max_autonomous_risk": action.max_autonomous_risk,
+            "blast_radius": action.blast_radius,
+            "rollback_available": action.rollback_available,
             "approval_required": action.approval_required,
         }
         for action in ALLOWED_ACTIONS.values()
@@ -86,7 +100,7 @@ def validate_action_policy(
     params: dict[str, Any],
     risk_score: float,
     requires_approval: bool,
-) -> AllowedAction:
+) -> tuple[AllowedAction, PolicyDecision]:
     action = ALLOWED_ACTIONS.get(action_type)
     if not action:
         raise ActionPolicyError(f"Action type is not allowlisted: {action_type}")
@@ -95,24 +109,30 @@ def validate_action_policy(
     if missing_params:
         raise ActionPolicyError(f"Action is missing required parameters: {', '.join(missing_params)}")
 
-    if action.approval_required and not requires_approval:
-        raise ActionPolicyError(f"{action_type} must require approval")
+    validate_param_allowlist(action_type, params)
 
-    if not requires_approval and risk_score > action.max_autonomous_risk:
-        raise ActionPolicyError(
-            f"{action_type} risk score {risk_score} exceeds autonomous limit {action.max_autonomous_risk}"
-        )
+    policy = evaluate_policy(
+        capability="runtime_mitigation",
+        action_type=action_type,
+        risk_score=risk_score,
+        evidence_count=1,
+        rollback_available=action.rollback_available,
+        blast_radius=action.blast_radius,
+        max_autonomous_risk=action.max_autonomous_risk,
+        approval_required=action.approval_required or requires_approval,
+    )
+    if policy.decision == "blocked":
+        raise ActionPolicyError("; ".join(policy.reasons))
+    if policy.decision == "approval_required" and not requires_approval:
+        raise ActionPolicyError("Action requires approval before execution")
 
-    if action_type == "SET_ENV_VAR" and params["key"] not in RESTORABLE_ENV_KEYS:
-        raise ActionPolicyError(f"Environment key is not restorable through this executor: {params['key']}")
+    return action, policy
 
-    if action_type == "DISABLE_FEATURE_FLAG" and params["flag"] not in DISABLEABLE_FLAGS:
-        raise ActionPolicyError(f"Feature flag is not managed by this executor: {params['flag']}")
 
-    if action_type == "SWITCH_DEPENDENCY_TO_MOCK" and params["dependency"] not in SWITCHABLE_DEPENDENCIES:
-        raise ActionPolicyError(f"Dependency is not switchable through this executor: {params['dependency']}")
-
-    if action_type == "ROLLBACK_CONFIG" and params["target"] not in ROLLBACK_TARGETS:
-        raise ActionPolicyError(f"Rollback target is not allowlisted: {params['target']}")
-
-    return action
+def validate_param_allowlist(action_type: str, params: dict[str, Any]) -> None:
+    rule = PARAM_ALLOWLISTS.get(action_type)
+    if not rule:
+        return
+    key, allowed_values, message = rule
+    if params[key] not in allowed_values:
+        raise ActionPolicyError(f"{message}: {params[key]}")
