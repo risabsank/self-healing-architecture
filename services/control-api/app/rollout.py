@@ -5,6 +5,7 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.apps import app_probes, get_application_for_sandbox, manifest_from_app, service_manifest
 from app.observability import record_incident_event
 from app.policy import PolicyDecision, evaluate_policy
 from app.repair import get_repair, load_incident
@@ -80,8 +81,11 @@ def start_canary_rollout(conn: Connection, repair_id: str, traffic_percentage: f
     if policy.decision != "autonomous":
         raise ValueError(f"Canary rollout is {policy.decision}: {'; '.join(policy.reasons)}")
 
-    rollout = create_rollout(conn, repair_id, traffic, policy)
-    signals = {**collect_canary_signals(), "autonomy": policy.model_dump()}
+    incident = load_incident(conn, str(repair["incident_id"]))
+    app = get_application_for_sandbox(conn, incident["sandbox_id"])
+    manifest = manifest_from_app(app)
+    rollout = create_rollout(conn, repair_id, traffic, policy, manifest)
+    signals = {**collect_canary_signals(manifest), "autonomy": policy.model_dump()}
     completed = finish_rollout(conn, rollout, repair, decide_rollout(signals), signals)
     conn.commit()
     return completed
@@ -113,7 +117,9 @@ def create_rollout(
     repair_id: str,
     traffic_percentage: float,
     policy: PolicyDecision,
+    manifest=None,
 ) -> dict[str, Any]:
+    target_environment = ((manifest.canary or {}).get("environment") if manifest else None) or CANARY_ENVIRONMENT
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -125,7 +131,7 @@ def create_rollout(
             """,
             (
                 repair_id,
-                CANARY_ENVIRONMENT,
+                target_environment,
                 traffic_percentage,
                 Jsonb({"autonomy": policy.model_dump()}),
             ),
@@ -135,8 +141,9 @@ def create_rollout(
     return rollout
 
 
-def collect_canary_signals() -> dict[str, Any]:
-    probes = [probe(*definition) for definition in CANARY_PROBES]
+def collect_canary_signals(manifest=None) -> dict[str, Any]:
+    probe_defs = app_probes(manifest, "canary") if manifest else []
+    probes = [manifest_probe(manifest, definition) for definition in probe_defs] if probe_defs else [probe(*definition) for definition in CANARY_PROBES]
     passed = sum(1 for item in probes if item["passed"])
     return {
         "strategy": "synthetic_probe_canary",
@@ -164,6 +171,37 @@ def probe(name: str, method: str, path: str) -> dict[str, Any]:
         "name": name,
         "method": method,
         "path": path,
+        "passed": passed,
+        "status": "passed" if passed else "failed",
+        "duration_ms": int((time.perf_counter() - start) * 1000),
+        "detail": detail,
+    }
+
+
+def manifest_probe(manifest, definition: dict[str, Any]) -> dict[str, Any]:
+    service = service_manifest(manifest, definition["service"]) if manifest else None
+    base_url = (service or {}).get("base_url", TARGET_BASE_URL)
+    start = time.perf_counter()
+    method = definition.get("method", "GET")
+    path = definition["path"]
+    try:
+        with httpx.Client(timeout=8) as client:
+            response = client.request(method, f"{base_url}{path}")
+        body = response.json()
+        status_ok = response.status_code < definition.get("expected_status_lt", 500)
+        healthy_status = definition.get("healthy_status")
+        body_ok = not healthy_status or body.get("status") == healthy_status
+        passed = status_ok and body_ok
+        detail = {"status_code": response.status_code, "body": body}
+    except Exception as exc:
+        passed = False
+        detail = {"error": type(exc).__name__, "message": str(exc)}
+
+    return {
+        "name": definition["name"],
+        "method": method,
+        "path": path,
+        "service": definition["service"],
         "passed": passed,
         "status": "passed" if passed else "failed",
         "duration_ms": int((time.perf_counter() - start) * 1000),

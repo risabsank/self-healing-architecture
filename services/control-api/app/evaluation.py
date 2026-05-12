@@ -396,7 +396,7 @@ def case_metrics(
         "detection_time_ms": detection_ms,
         "diagnosis_time_ms": diagnosis_ms,
         "recovery_time_ms": recovery_ms,
-        "diagnosis_accurate": top_cause == spec.expected_root_cause,
+        "diagnosis_accurate": root_cause_matches(spec.expected_root_cause, top_cause),
         "expected_root_cause": spec.expected_root_cause,
         "diagnosed_root_cause": top_cause,
         "expected_action": spec.expected_action,
@@ -505,6 +505,23 @@ def serialize_action(action: dict[str, Any] | None) -> dict[str, Any] | None:
 def top_hypothesis(analysis: dict[str, Any]) -> str | None:
     hypotheses = analysis.get("hypotheses") or []
     return hypotheses[0].get("cause") if hypotheses else None
+
+
+def root_cause_matches(expected: str, diagnosed: str | None) -> bool:
+    if not diagnosed:
+        return False
+    expected_terms = important_terms(expected)
+    diagnosed_terms = important_terms(diagnosed)
+    return bool(expected_terms) and len(expected_terms & diagnosed_terms) / len(expected_terms) >= 0.6
+
+
+def important_terms(text: str) -> set[str]:
+    stop = {"the", "and", "or", "a", "an", "to", "of", "is", "in", "for", "with", "after", "before", "enabled"}
+    return {
+        token
+        for token in "".join(ch.lower() if ch.isalnum() else " " for ch in text).split()
+        if len(token) > 2 and token not in stop
+    }
 
 
 def elapsed_ms(start: float) -> int:

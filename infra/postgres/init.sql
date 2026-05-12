@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS sandbox_services (
   UNIQUE (sandbox_id, service_name)
 );
 
+CREATE TABLE IF NOT EXISTS applications (
+  app_id TEXT PRIMARY KEY,
+  sandbox_id TEXT NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  manifest JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS sandbox_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
@@ -207,6 +218,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
 CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
   ON health_checks (sandbox_id, checked_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_applications_sandbox
+  ON applications (sandbox_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_sandbox_snapshots_sandbox_created
   ON sandbox_snapshots (sandbox_id, created_at DESC);
 
@@ -257,9 +271,69 @@ VALUES (
   'fastapi',
   'http://target-api:8001',
   'http://target-api:8001/health',
-  '{"public_url": "http://localhost:8001"}'::jsonb
+  '{"app_id": "breakable-target", "public_url": "http://localhost:8001", "adapter_url": "http://target-adapter:8010"}'::jsonb
 )
 ON CONFLICT (sandbox_id, service_name) DO UPDATE
 SET base_url = EXCLUDED.base_url,
     health_url = EXCLUDED.health_url,
     metadata = EXCLUDED.metadata;
+
+INSERT INTO applications (app_id, sandbox_id, display_name, environment, manifest, status)
+VALUES (
+  'breakable-target',
+  'local-docker',
+  'Breakable Target API',
+  'local',
+  '{
+    "app_id": "breakable-target",
+    "display_name": "Breakable Target API",
+    "environment": "local",
+    "sandbox_id": "local-docker",
+    "dependencies": ["postgres", "checkout-provider"],
+    "services": [{
+      "name": "target-api",
+      "service_type": "fastapi",
+      "base_url": "http://target-api:8001",
+      "health_url": "http://target-api:8001/health",
+      "public_url": "http://localhost:8001",
+      "adapter_url": "http://target-adapter:8010",
+      "metadata": {"role": "reference-app"}
+    }],
+    "health_checks": [{"name": "health", "service": "target-api", "path": "/health", "healthy_status": "healthy"}],
+    "critical_probes": [
+      {"name": "metadata", "service": "target-api", "method": "GET", "path": "/metadata"},
+      {"name": "items", "service": "target-api", "method": "GET", "path": "/items"},
+      {"name": "checkout", "service": "target-api", "method": "GET", "path": "/checkout"}
+    ],
+    "safe_actions": [
+      {"action_type": "SET_ENV_VAR", "service": "target-api", "description": "Restore a known-good runtime configuration value.", "required_params": ["service", "key", "value_from"], "parameter_allowlists": {"key": ["DATABASE_URL", "TARGET_REQUIRED_SECRET"]}, "adapter_path": "/adapter/actions/SET_ENV_VAR", "max_autonomous_risk": 0.35, "blast_radius": "low", "rollback_available": true, "approval_required": false, "clears_scenarios": ["bad_database_url", "missing_required_env"]},
+      {"action_type": "RESTART_SERVICE", "service": "target-api", "description": "Request a bounded service restart.", "required_params": ["service"], "parameter_allowlists": {}, "adapter_path": "/adapter/actions/RESTART_SERVICE", "max_autonomous_risk": 0.35, "blast_radius": "low", "rollback_available": true, "approval_required": false, "clears_scenarios": ["port_conflict"]},
+      {"action_type": "DISABLE_FEATURE_FLAG", "service": "target-api", "description": "Disable an allowlisted feature flag.", "required_params": ["service", "flag"], "parameter_allowlists": {"flag": ["FEATURE_CHECKOUT_ENABLED"]}, "adapter_path": "/adapter/actions/DISABLE_FEATURE_FLAG", "max_autonomous_risk": 0.35, "blast_radius": "low", "rollback_available": true, "approval_required": false, "clears_scenarios": ["bad_feature_flag", "rate_limit"]},
+      {"action_type": "SWITCH_DEPENDENCY_TO_MOCK", "service": "target-api", "description": "Route a dependency to an allowlisted fallback.", "required_params": ["service", "dependency"], "parameter_allowlists": {"dependency": ["checkout-provider"]}, "adapter_path": "/adapter/actions/SWITCH_DEPENDENCY_TO_MOCK", "max_autonomous_risk": 0.35, "blast_radius": "low", "rollback_available": true, "approval_required": false, "clears_scenarios": ["dependency_unavailable", "rate_limit"]},
+      {"action_type": "ROLLBACK_CONFIG", "service": "target-api", "description": "Return runtime configuration to a previous known-good version.", "required_params": ["service", "target"], "parameter_allowlists": {"target": ["previous_known_good_app_version"]}, "adapter_path": "/adapter/actions/ROLLBACK_CONFIG", "max_autonomous_risk": 0.0, "blast_radius": "medium", "rollback_available": true, "approval_required": true, "clears_scenarios": ["schema_mismatch"]}
+    ],
+    "repair_policy": {
+      "approved_paths": ["target-app/api/tests", "target-app/api/main.py", "target-app/api/requirements.txt"],
+      "path_owners": {"target-app/api/main.py": "target-api", "target-app/api/tests/": "target-api-tests", "target-app/api/requirements.txt": "target-api"},
+      "test_commands": [["python", "-m", "unittest", "discover", "target-app/api/tests"]],
+      "build_commands": [],
+      "rollback_strategy": "Apply generated rollback operations."
+    },
+    "repo": {"root": "/workspace", "kind": "local"},
+    "verification": {"commands": [["python", "-m", "unittest", "discover", "target-app/api/tests"]], "sandbox_replay": {"scenario": "bad_database_url"}},
+    "canary": {"environment": "local-docker-canary", "traffic_percentage": 10.0, "probes": [
+      {"name": "health", "service": "target-api", "method": "GET", "path": "/health", "healthy_status": "healthy"},
+      {"name": "metadata", "service": "target-api", "method": "GET", "path": "/metadata"},
+      {"name": "items", "service": "target-api", "method": "GET", "path": "/items"},
+      {"name": "checkout", "service": "target-api", "method": "GET", "path": "/checkout"}
+    ]}
+  }'::jsonb,
+  'active'
+)
+ON CONFLICT (app_id) DO UPDATE
+SET sandbox_id = EXCLUDED.sandbox_id,
+    display_name = EXCLUDED.display_name,
+    environment = EXCLUDED.environment,
+    manifest = EXCLUDED.manifest,
+    status = EXCLUDED.status,
+    updated_at = now();

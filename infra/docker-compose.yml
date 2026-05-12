@@ -67,9 +67,24 @@ services:
       timeout: 5s
       retries: 12
 
+  target-adapter:
+    build:
+      context: ../services/sidecar-adapter
+    environment:
+      APP_ID: breakable-target
+      SERVICE_NAME: target-api
+      TARGET_BASE_URL: http://target-api:8001
+    ports:
+      - "8010:8010"
+    depends_on:
+      target-api:
+        condition: service_started
+
   control-api:
     build:
       context: ../services/control-api
+    env_file:
+      - ../.env
     environment:
       DATABASE_URL: ${CONTROL_DATABASE_URL:-postgresql://self_healing:self_healing@postgres:5432/self_healing}
       TARGET_API_BASE_URL: http://target-api:8001
@@ -98,11 +113,15 @@ services:
         condition: service_healthy
       target-api:
         condition: service_started
+      target-adapter:
+        condition: service_started
 
   control-worker:
     build:
       context: ../services/control-api
     command: ["python", "-m", "app.worker"]
+    env_file:
+      - ../.env
     environment:
       DATABASE_URL: ${CONTROL_DATABASE_URL:-postgresql://self_healing:self_healing@postgres:5432/self_healing}
       TARGET_API_BASE_URL: http://target-api:8001
@@ -126,6 +145,8 @@ services:
       postgres:
         condition: service_healthy
       target-api:
+        condition: service_started
+      target-adapter:
         condition: service_started
 
 volumes:

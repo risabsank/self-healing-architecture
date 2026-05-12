@@ -4,6 +4,7 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.apps import get_application_for_sandbox, manifest_from_app, safe_action
 from app.memory import write_incident_memory
 from app.observability import record_incident_event, record_runtime_event
 from app.sandbox.allowed_actions import ActionPolicyError, validate_action_policy
@@ -29,6 +30,9 @@ async def execute_remediation_action(
     action = load_action(conn, action_id)
     incident = load_incident(conn, str(action["incident_id"]))
     params = dict(action["params"] or {})
+    app = get_application_for_sandbox(conn, incident["sandbox_id"])
+    manifest = manifest_from_app(app)
+    manifest_action = safe_action(manifest, action["action_type"], params.get("service", ""))
 
     try:
         action_policy, autonomy = validate_action_policy(
@@ -36,6 +40,7 @@ async def execute_remediation_action(
             params,
             float(action["risk_score"]),
             bool(action["requires_approval"]),
+            manifest_action,
         )
         ensure_executable(action)
     except (ActionPolicyError, ActionBlockedError) as exc:
@@ -60,7 +65,7 @@ async def execute_remediation_action(
     try:
         # The executor only calls typed target runtime endpoints. It never
         # receives or runs raw shell commands.
-        target_result = await apply_runtime_action(action["action_type"], params, service["base_url"])
+        target_result = await apply_runtime_action(action["action_type"], params, service, manifest_action)
         record_incident_event(
             conn,
             incident_id=str(incident["id"]),
@@ -145,7 +150,17 @@ def fetch_one(conn: Connection, sql: str, params: tuple[Any, ...]) -> dict[str, 
         return cur.fetchone()
 
 
-async def apply_runtime_action(action_type: str, params: dict[str, Any], base_url: str) -> dict[str, Any]:
+async def apply_runtime_action(
+    action_type: str,
+    params: dict[str, Any],
+    service: dict[str, Any],
+    manifest_action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base_url = service["base_url"]
+    adapter_url = (service.get("metadata") or {}).get("adapter_url")
+    if adapter_url and manifest_action and manifest_action.get("adapter_path"):
+        return await target_request("POST", f"{adapter_url}{manifest_action['adapter_path']}", {"params": params})
+
     if action_type == "SET_ENV_VAR":
         return await target_request(
             "POST",

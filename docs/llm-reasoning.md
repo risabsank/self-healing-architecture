@@ -7,7 +7,7 @@ The incident agent can use Claude for structured diagnosis and bounded mitigatio
 ```text
 LLM_REASONING_ENABLED=true
 ANTHROPIC_API_KEY=<secret>
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+ANTHROPIC_MODEL=claude-sonnet-4-5
 ```
 
 File-secret injection is also supported:

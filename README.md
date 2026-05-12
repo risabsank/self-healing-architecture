@@ -32,6 +32,8 @@ The system is designed to be easy to understand while still reflecting productio
 
 The core moment: the service breaks live, the runtime investigates like an incident responder, restores service with a constrained mitigation, proposes a durable fix, validates it through a deployment pipeline, canaries it safely, and leaves behind a complete audit trail.
 
+The runtime also supports Docker Compose applications beyond the bundled target. An application can register a `self-healing.yaml` manifest with service URLs, probes, safe actions, sidecar adapter settings, repair policy, and canary checks. See `docs/bring-your-own-website.md`.
+
 ## Design Principles
 
 - The agent must not blindly run shell commands.
@@ -237,7 +239,7 @@ Run the incident-specific end-to-end walkthrough for the bad feature flag recove
 python3 scripts/incidents/bad_feature_flag_recovery.py
 ```
 
-See `docs/incidents/bad-feature-flag-recovery.md` for the full operator flow, expected outputs, and troubleshooting notes.
+See `docs/incidents/bad-feature-flag-operator-runbook.md` for full setup and run instructions, or `docs/incidents/bad-feature-flag-recovery.md` for the shorter incident walkthrough.
 
 Useful checks:
 

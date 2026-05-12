@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     firecracker_timeout_seconds: int = 10
     llm_reasoning_enabled: bool = False
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-sonnet-latest"
+    anthropic_model: str = "claude-sonnet-4-5"
     anthropic_api_url: str = "https://api.anthropic.com/v1/messages"
     anthropic_timeout_seconds: int = 30
 

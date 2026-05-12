@@ -5,6 +5,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from app.agents.repair_llm import plan_repair_with_claude
+from app.apps import get_application_for_sandbox, manifest_from_app
 from app.core.config import settings
 from app.observability import record_incident_event
 from app.patching import (
@@ -194,7 +195,8 @@ def ensure_repair_schema(conn: Connection) -> None:
 def create_repair_plan(conn: Connection, incident_id: str) -> dict[str, Any]:
     incident = load_incident(conn, incident_id)
     plan = plan_from_incident(conn, incident)
-    result = repair_result(plan)
+    policy_paths, policy_owners = repair_policy_for_incident(conn, incident)
+    result = repair_result(plan, policy_paths, policy_owners)
     policy = evaluate_repair_policy(plan)
     status = repair_status_for(policy)
 
@@ -272,9 +274,11 @@ def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
         return finish_repair(conn, repair, "blocked", "repair.blocked", {"blocked": {"reason": block_reason}})
 
     plan = RepairPlan.model_validate(repair["result"]["plan"])
+    approved = repair["result"].get("approved_paths")
+    owners = {item["path"]: item["owner"] for item in repair["result"].get("path_ownership", [])}
     updated = finish_repair(conn, repair, "patch_applied", "repair.patch_applied", {
-        "applied": apply_operations(plan.operations, (repair["result"] or {}).get("patch_preview", [])),
-        "rollback_preview": build_patch_set(rollback_operations(repair))["patch_preview"],
+        "applied": apply_operations(plan.operations, (repair["result"] or {}).get("patch_preview", []), approved, owners),
+        "rollback_preview": build_patch_set(rollback_operations(repair), approved, owners)["patch_preview"],
     })
     incident = load_incident(conn, str(updated["incident_id"]))
     update_incident_memory(conn, str(incident["id"]))
@@ -285,23 +289,41 @@ def rollback_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     repair = require_repair(conn, repair_id)
     if repair["status"] not in {"patch_applied", "verified", "verification_failed", "released"}:
         raise ValueError(f"Repair status does not allow rollback: {repair['status']}")
-    applied = apply_operations(rollback_operations(repair))
+    approved = (repair["result"] or {}).get("approved_paths")
+    owners = {item["path"]: item["owner"] for item in (repair["result"] or {}).get("path_ownership", [])}
+    applied = apply_operations(rollback_operations(repair), approved=approved, owners=owners)
     return finish_repair(conn, repair, "rolled_back", "repair.rolled_back", {"rollback_applied": applied})
 
 
 def plan_from_incident(conn: Connection, incident: dict[str, Any]) -> RepairPlan:
-    return llm_repair_plan(conn, incident) or deterministic_plan_from_incident(incident)
+    policy_paths, _ = repair_policy_for_incident(conn, incident)
+    return llm_repair_plan(conn, incident, policy_paths) or deterministic_plan_from_incident(incident)
 
 
-def repair_result(plan: RepairPlan) -> dict[str, Any]:
-    ensure_operations_are_allowed(plan.operations)
+def repair_result(
+    plan: RepairPlan,
+    policy_paths: list[str] | None = None,
+    policy_owners: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    allowed_paths = policy_paths or approved_paths()
+    owners = policy_owners or None
+    ensure_operations_are_allowed(plan.operations, allowed_paths, owners)
     return {
         "plan": plan.model_dump(),
-        **build_patch_set(plan.operations),
-        "approved_paths": approved_paths(),
-        "path_ownership": path_ownership(plan.operations),
+        **build_patch_set(plan.operations, allowed_paths, owners),
+        "approved_paths": allowed_paths,
+        "path_ownership": path_ownership(plan.operations, owners),
         "planning_provider": plan.planning_provider,
     }
+
+
+def repair_policy_for_incident(conn: Connection, incident: dict[str, Any]) -> tuple[list[str], dict[str, str]]:
+    app = get_application_for_sandbox(conn, incident["sandbox_id"])
+    manifest = manifest_from_app(app)
+    if not manifest:
+        return approved_paths(), {}
+    policy = manifest.repair_policy
+    return policy.approved_paths or approved_paths(), policy.path_owners
 
 
 def repair_result_view(repair: dict[str, Any]) -> dict[str, Any]:
@@ -313,11 +335,11 @@ def repair_result_view(repair: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def llm_repair_plan(conn: Connection, incident: dict[str, Any]) -> RepairPlan | None:
+def llm_repair_plan(conn: Connection, incident: dict[str, Any], allowed_paths: list[str]) -> RepairPlan | None:
     if not settings.llm_reasoning_enabled:
         return None
     try:
-        decision = plan_repair_with_claude(conn, incident, approved_paths())
+        decision = plan_repair_with_claude(conn, incident, allowed_paths)
         plan = RepairPlan.model_validate(decision.model_dump())
         plan.planning_provider = "claude"
         return plan

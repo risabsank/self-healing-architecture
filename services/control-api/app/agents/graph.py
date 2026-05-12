@@ -5,6 +5,7 @@ from psycopg.types.json import Jsonb
 
 from app.agents.llm_graph import run_llm_incident_graph
 from app.agents.state import Evidence, Hypothesis, IncidentAnalysis, MitigationCandidate
+from app.apps import get_application_for_sandbox
 from app.core.config import settings
 from app.memory import retrieve_similar_memories
 from app.observability import record_incident_event
@@ -209,6 +210,7 @@ def set_incident_status(conn: Connection, incident_id: str, status: str) -> None
 
 def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
     evidence: list[Evidence] = []
+    app = get_application_for_sandbox(conn, sandbox_id)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -303,6 +305,25 @@ def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
                     "metadata": service["metadata"],
                 },
                 confidence=0.7,
+            )
+        )
+
+    if app:
+        manifest = app["manifest"]
+        evidence.append(
+            Evidence(
+                    source="app_manifest",
+                    kind="registered_application",
+                    summary=f"Registered app manifest: {app['display_name']}",
+                    content={
+                        "app_id": app["app_id"],
+                        "environment": app["environment"],
+                        "services": manifest.get("services", []),
+                        "critical_probes": manifest.get("critical_probes", []),
+                        "safe_actions": manifest.get("safe_actions", []),
+                        "repair_policy": manifest.get("repair_policy", {}),
+                    },
+                confidence=0.9,
             )
         )
 

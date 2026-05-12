@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from psycopg import Connection
 
+from app.agents.llm import resolve_model
 from app.core.config import settings
 from app.core.db import get_connection
 from app.monitoring import run_all_health_checks
@@ -39,7 +40,8 @@ async def health(conn: Connection = Depends(get_connection)):
             "reasoning": {
                 "llm_enabled": settings.llm_reasoning_enabled,
                 "anthropic_key_configured": bool(settings.anthropic_api_key),
-                "model": settings.anthropic_model if settings.llm_reasoning_enabled else None,
+                "model": resolve_model(settings.anthropic_model) if settings.llm_reasoning_enabled else None,
+                "configured_model": settings.anthropic_model if settings.llm_reasoning_enabled else None,
             },
         },
     }

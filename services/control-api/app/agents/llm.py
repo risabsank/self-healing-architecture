@@ -8,9 +8,22 @@ from pydantic import BaseModel
 from app.core.config import settings
 
 
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+MODEL_ALIASES = {
+    # Older local docs used this alias. Anthropic now returns 404 for it in
+    # some accounts/regions, so normalize it before sending the request.
+    "claude-3-5-sonnet-latest": DEFAULT_ANTHROPIC_MODEL,
+}
+
+
+class AnthropicAPIError(RuntimeError):
+    pass
+
+
 class ClaudeClient:
     def __init__(self) -> None:
         self.enabled = settings.llm_reasoning_enabled and bool(settings.anthropic_api_key)
+        self.model = resolve_model(settings.anthropic_model)
 
     def complete_json(self, system: str, prompt: str, schema: type[BaseModel]) -> BaseModel:
         if not self.enabled:
@@ -21,7 +34,7 @@ class ClaudeClient:
 
     def request(self, system: str, prompt: str) -> str:
         body = {
-            "model": settings.anthropic_model,
+            "model": self.model,
             "max_tokens": 1600,
             "system": system,
             "messages": [{"role": "user", "content": prompt}],
@@ -33,10 +46,25 @@ class ClaudeClient:
         }
         with httpx.Client(timeout=settings.anthropic_timeout_seconds) as client:
             response = client.post(settings.anthropic_api_url, headers=headers, json=body)
-            response.raise_for_status()
+            raise_for_anthropic_status(response, self.model)
             payload = response.json()
 
         return extract_text(payload)
+
+
+def resolve_model(model: str | None) -> str:
+    configured = (model or DEFAULT_ANTHROPIC_MODEL).strip()
+    return MODEL_ALIASES.get(configured, configured)
+
+
+def raise_for_anthropic_status(response: httpx.Response, model: str) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = response.text[:600] if response.text else ""
+        raise AnthropicAPIError(
+            f"Anthropic request failed with HTTP {response.status_code} for model {model!r}: {detail}"
+        ) from exc
 
 
 def extract_text(payload: dict[str, Any]) -> str:
@@ -65,7 +93,7 @@ Return only valid JSON matching the requested schema.
 Do not include hidden chain-of-thought. Use concise structured reasoning summaries.
 Only propose actions from this allowlist:
 SET_ENV_VAR, RESTART_SERVICE, DISABLE_FEATURE_FLAG, SWITCH_DEPENDENCY_TO_MOCK, ROLLBACK_CONFIG.
-All mitigation params must include service="target-api".
+All mitigation params must include the affected service name from the evidence or app manifest.
 Risk scores must be between 0 and 1.
 """.strip()
 

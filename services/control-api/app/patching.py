@@ -14,18 +14,29 @@ class PatchOperation(BaseModel):
     mode: Literal["create_or_replace", "delete"] = "create_or_replace"
 
 
-def build_patch_set(operations: list[PatchOperation]) -> dict[str, Any]:
+def build_patch_set(
+    operations: list[PatchOperation],
+    approved: list[str] | None = None,
+    owners: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return {
-        "patch_preview": [patch_preview(operation) for operation in operations],
-        "rollback_operations": [operation.model_dump() for operation in rollback_operations_from_current_files(operations)],
+        "patch_preview": [patch_preview(operation, approved, owners) for operation in operations],
+        "rollback_operations": [
+            operation.model_dump() for operation in rollback_operations_from_current_files(operations, approved)
+        ],
     }
 
 
-def apply_operations(operations: list[PatchOperation], previews: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def apply_operations(
+    operations: list[PatchOperation],
+    previews: list[dict[str, Any]] | None = None,
+    approved: list[str] | None = None,
+    owners: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     # All durable repairs pass through this boundary: approved paths only,
     # known owners only, and no arbitrary shell access.
-    ensure_operations_are_allowed(operations)
-    ensure_current_hashes_match(previews or [])
+    ensure_operations_are_allowed(operations, approved, owners)
+    ensure_current_hashes_match(previews or [], approved)
     applied = []
     for operation in operations:
         target = resolve_repo_path(operation.path)
@@ -40,32 +51,39 @@ def apply_operations(operations: list[PatchOperation], previews: list[dict[str, 
     return applied
 
 
-def ensure_current_hashes_match(previews: list[dict[str, Any]]) -> None:
+def ensure_current_hashes_match(previews: list[dict[str, Any]], approved: list[str] | None = None) -> None:
     for preview in previews:
-        current = read_approved_file(preview["path"])
+        current = read_approved_file(preview["path"], approved)
         expected = preview.get("previous_sha256")
         actual = sha256_text(current)
         if actual != expected:
             raise ValueError(f"Repair target changed after preview generation: {preview['path']}")
 
 
-def patch_preview(operation: PatchOperation) -> dict[str, Any]:
-    previous = read_approved_file(operation.path)
+def patch_preview(
+    operation: PatchOperation,
+    approved: list[str] | None = None,
+    owners: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    previous = read_approved_file(operation.path, approved)
     next_content = "" if operation.mode == "delete" else operation.content
     return {
         "path": operation.path,
         "mode": operation.mode,
-        "owner": owner_for_path(operation.path),
+        "owner": owner_for_path(operation.path, owners),
         "previous_sha256": sha256_text(previous),
         "new_sha256": None if operation.mode == "delete" else sha256_text(operation.content),
         "diff": unified_diff(operation.path, previous, next_content),
     }
 
 
-def rollback_operations_from_current_files(operations: list[PatchOperation]) -> list[PatchOperation]:
+def rollback_operations_from_current_files(
+    operations: list[PatchOperation],
+    approved: list[str] | None = None,
+) -> list[PatchOperation]:
     rollback = []
     for operation in operations:
-        previous = read_approved_file(operation.path)
+        previous = read_approved_file(operation.path, approved)
         rollback.append(PatchOperation(
             path=operation.path,
             content=previous or "",
@@ -78,15 +96,19 @@ def rollback_operations(repair: dict[str, Any]) -> list[PatchOperation]:
     return [PatchOperation.model_validate(operation) for operation in (repair["result"] or {}).get("rollback_operations", [])]
 
 
-def path_ownership(operations: list[PatchOperation]) -> list[dict[str, str]]:
-    return [{"path": operation.path, "owner": owner_for_path(operation.path)} for operation in operations]
+def path_ownership(operations: list[PatchOperation], owners: dict[str, str] | None = None) -> list[dict[str, str]]:
+    return [{"path": operation.path, "owner": owner_for_path(operation.path, owners)} for operation in operations]
 
 
-def ensure_operations_are_allowed(operations: list[PatchOperation]) -> None:
+def ensure_operations_are_allowed(
+    operations: list[PatchOperation],
+    approved: list[str] | None = None,
+    owners: dict[str, str] | None = None,
+) -> None:
     for operation in operations:
-        if not is_approved_path(operation.path):
+        if not is_approved_path(operation.path, approved):
             raise ValueError(f"Repair operation is outside approved paths: {operation.path}")
-        if owner_for_path(operation.path) == "unowned":
+        if owner_for_path(operation.path, owners) == "unowned":
             raise ValueError(f"Repair operation has no path owner rule: {operation.path}")
 
 
@@ -94,8 +116,8 @@ def approved_paths() -> list[str]:
     return [normalize_relative(path) for path in settings.repair_approved_paths.split(",") if path.strip()]
 
 
-def read_approved_file(path: str) -> str | None:
-    if not is_approved_path(path):
+def read_approved_file(path: str, approved: list[str] | None = None) -> str | None:
+    if not is_approved_path(path, approved):
         raise ValueError(f"Repair read is outside approved paths: {path}")
     target = resolve_repo_path(path)
     return target.read_text() if target.exists() else None
@@ -121,11 +143,12 @@ def unified_diff(path: str, previous: str | None, next_content: str) -> str:
     return "".join(difflib.unified_diff(before, after, fromfile=f"a/{path}", tofile=f"b/{path}"))
 
 
-def owner_for_path(path: str) -> str:
+def owner_for_path(path: str, owners: dict[str, str] | None = None) -> str:
     normalized = normalize_relative(path)
+    rules = {normalize_relative(path): owner for path, owner in (owners or path_owner_rules()).items()}
     matches = [
         (prefix, owner)
-        for prefix, owner in path_owner_rules().items()
+        for prefix, owner in rules.items()
         if normalized == prefix or normalized.startswith(f"{prefix}/")
     ]
     return max(matches, key=lambda item: len(item[0]))[1] if matches else "unowned"
@@ -141,9 +164,10 @@ def path_owner_rules() -> dict[str, str]:
     return rules
 
 
-def is_approved_path(path: str) -> bool:
+def is_approved_path(path: str, approved: list[str] | None = None) -> bool:
     normalized = normalize_relative(path)
-    return any(normalized == approved or normalized.startswith(f"{approved}/") for approved in approved_paths())
+    approved_items = approved or approved_paths()
+    return any(normalized == item or normalized.startswith(f"{item}/") for item in approved_items)
 
 
 def resolve_repo_path(path: str) -> Path:

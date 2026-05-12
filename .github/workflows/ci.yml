@@ -20,13 +20,21 @@ jobs:
         run: pip install -r services/control-api/requirements.txt
 
       - name: Static compile
-        run: python -X pycache_prefix=/tmp/self-healing-pycache -m compileall services/control-api/app services/control-api/tests target-app/api
+        run: python -X pycache_prefix=/tmp/self-healing-pycache -m compileall services/control-api/app services/control-api/tests services/sidecar-adapter target-app/api
 
       - name: Target app unit tests
+        env:
+          DATABASE_URL: postgresql://ci:ci@unused:5432/ci
+          TARGET_REQUIRED_SECRET: ci-secret
         run: PYTHONPATH=target-app/api python -m unittest discover target-app/api/tests
 
       - name: Control API unit tests
         run: PYTHONPATH=services/control-api python -m unittest discover services/control-api/tests
+
+      - name: Sidecar adapter unit tests
+        run: |
+          pip install -r services/sidecar-adapter/requirements.txt
+          PYTHONPATH=services/sidecar-adapter python -m unittest discover services/sidecar-adapter/tests
 
       - name: Compose config validation
         run: docker compose -f infra/docker-compose.yml config

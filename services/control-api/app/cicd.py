@@ -9,6 +9,7 @@ import httpx
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from app.apps import get_application_for_sandbox, manifest_from_app
 from app.observability import record_incident_event
 from app.policy import evaluate_policy
 from app.repair import get_repair, load_incident, repo_root
@@ -78,7 +79,7 @@ def list_verification_runs(conn: Connection, repair_id: str) -> list[dict[str, A
 def run_verification_pipeline(conn: Connection, repair_id: str) -> dict[str, Any]:
     repair = require_verifiable_repair(conn, repair_id)
     run = create_run(conn, repair_id)
-    checks = execute_checks(repair)
+    checks = execute_checks(conn, repair)
     status = "passed" if all(check["passed"] for check in checks) else "failed"
     updated_run = finish_run(conn, str(run["id"]), status, checks)
     update_repair_verification(conn, repair, status, updated_run)
@@ -168,19 +169,24 @@ def update_repair_verification(
     )
 
 
-def execute_checks(repair: dict[str, Any]) -> list[dict[str, Any]]:
+def execute_checks(conn: Connection, repair: dict[str, Any]) -> list[dict[str, Any]]:
     root = repo_root()
     affected_paths = repair["affected_paths"] or []
+    incident = load_incident(conn, str(repair["incident_id"]))
+    app = get_application_for_sandbox(conn, incident["sandbox_id"]) if incident else None
+    manifest = manifest_from_app(app)
+    app_unit_commands = (manifest.repair_policy.test_commands if manifest else []) or [UNIT_TEST_COMMAND]
     # Release eligibility is intentionally a fixed set of bounded gates.
-    return [
-        run_command_check("unit_tests", UNIT_TEST_COMMAND, root),
+    checks = [
+        *[run_command_check(f"unit_tests_{index + 1}", command, root) for index, command in enumerate(app_unit_commands)],
         run_command_check("static_compile", COMPILE_COMMAND, root),
         static_ast_check(root, affected_paths),
         security_scan(root, affected_paths),
         build_manifest_check(root),
-        integration_health_check(),
-        sandbox_replay_check(),
+        integration_health_check(manifest),
+        sandbox_replay_check(manifest),
     ]
+    return checks
 
 
 def verification_policy(repair: dict[str, Any], status: str):
@@ -249,10 +255,11 @@ def build_manifest_check(root: Path) -> dict[str, Any]:
     return check_result("build_manifest", not missing, {"missing": missing}, start)
 
 
-def integration_health_check() -> dict[str, Any]:
+def integration_health_check(manifest=None) -> dict[str, Any]:
     start = time.perf_counter()
+    health_url = first_service(manifest).get("health_url") if manifest else f"{TARGET_BASE_URL}/health"
     try:
-        body = request_json("GET", f"{TARGET_BASE_URL}/health")
+        body = request_json("GET", health_url)
         passed = body.get("status") == "healthy"
         detail = {"status": body.get("status"), "active_scenarios": body.get("active_scenarios")}
     except Exception as exc:
@@ -261,22 +268,25 @@ def integration_health_check() -> dict[str, Any]:
     return check_result("integration_health", passed, detail, start)
 
 
-def sandbox_replay_check() -> dict[str, Any]:
+def sandbox_replay_check(manifest=None) -> dict[str, Any]:
     start = time.perf_counter()
+    service = first_service(manifest)
+    base_url = service.get("base_url", TARGET_BASE_URL)
+    scenario = ((manifest.verification or {}).get("sandbox_replay") or {}).get("scenario", "bad_database_url") if manifest else "bad_database_url"
     try:
-        request_json("POST", f"{TARGET_BASE_URL}/scenarios/bad_database_url/activate")
-        unhealthy = request_json("GET", f"{TARGET_BASE_URL}/health")
-        request_json("POST", f"{TARGET_BASE_URL}/scenarios/reset")
-        healthy = request_json("GET", f"{TARGET_BASE_URL}/health")
+        request_json("POST", f"{base_url}/scenarios/{scenario}/activate")
+        unhealthy = request_json("GET", service.get("health_url", f"{base_url}/health"))
+        request_json("POST", f"{base_url}/scenarios/reset")
+        healthy = request_json("GET", service.get("health_url", f"{base_url}/health"))
         passed = unhealthy.get("status") == "unhealthy" and healthy.get("status") == "healthy"
         detail = {
-            "replayed_scenario": "bad_database_url",
+            "replayed_scenario": scenario,
             "during_replay": unhealthy.get("status"),
             "after_reset": healthy.get("status"),
         }
     except Exception as exc:
         try:
-            request_json("POST", f"{TARGET_BASE_URL}/scenarios/reset")
+            request_json("POST", f"{base_url}/scenarios/reset")
         except Exception:
             pass
         passed = False
@@ -289,6 +299,12 @@ def request_json(method: str, url: str) -> dict[str, Any]:
         response = client.request(method, url)
         response.raise_for_status()
         return response.json()
+
+
+def first_service(manifest) -> dict[str, Any]:
+    if not manifest or not manifest.services:
+        return {"base_url": TARGET_BASE_URL, "health_url": f"{TARGET_BASE_URL}/health"}
+    return manifest.services[0].model_dump()
 
 
 def python_paths(root: Path, paths: list[str]) -> list[Path]:

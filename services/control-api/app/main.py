@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.apps import router as apps_router
 from app.api.routes.actions import router as actions_router
 from app.api.routes.evaluations import router as evaluations_router
 from app.api.routes.health import router as health_router
@@ -13,6 +14,7 @@ from app.api.routes.observability import router as observability_router
 from app.api.routes.repairs import router as repairs_router
 from app.api.routes.sandboxes import router as sandboxes_router
 from app.api.routes.scenarios import router as scenarios_router
+from app.apps import ensure_app_schema
 from app.cicd import ensure_cicd_schema
 from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
@@ -26,6 +28,7 @@ from app.rollout import ensure_rollout_schema
 
 
 SCHEMA_INITIALIZERS = (
+    ensure_app_schema,
     ensure_memory_schema,
     ensure_repair_schema,
     ensure_cicd_schema,
@@ -87,6 +90,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(apps_router)
 app.include_router(sandboxes_router)
 app.include_router(incidents_router)
 app.include_router(scenarios_router)
