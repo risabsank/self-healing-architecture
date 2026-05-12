@@ -20,10 +20,13 @@ jobs:
         run: pip install -r services/control-api/requirements.txt
 
       - name: Static compile
-        run: python -X pycache_prefix=/tmp/self-healing-pycache -m compileall services/control-api/app target-app/api
+        run: python -X pycache_prefix=/tmp/self-healing-pycache -m compileall services/control-api/app services/control-api/tests target-app/api
 
       - name: Target app unit tests
         run: PYTHONPATH=target-app/api python -m unittest discover target-app/api/tests
+
+      - name: Control API unit tests
+        run: PYTHONPATH=services/control-api python -m unittest discover services/control-api/tests
 
       - name: Compose config validation
         run: docker compose -f infra/docker-compose.yml config

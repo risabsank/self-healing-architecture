@@ -47,6 +47,7 @@ class RepairPlan(BaseModel):
     verification_plan: list[str]
     rollback_plan: str
     operations: list[PatchOperation] = Field(default_factory=list)
+    planning_provider: str = "deterministic"
 
 
 REPAIR_RULES = [
@@ -272,7 +273,7 @@ def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
 
     plan = RepairPlan.model_validate(repair["result"]["plan"])
     updated = finish_repair(conn, repair, "patch_applied", "repair.patch_applied", {
-        "applied": apply_operations(plan.operations),
+        "applied": apply_operations(plan.operations, (repair["result"] or {}).get("patch_preview", [])),
         "rollback_preview": build_patch_set(rollback_operations(repair))["patch_preview"],
     })
     incident = load_incident(conn, str(updated["incident_id"]))
@@ -282,7 +283,7 @@ def apply_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
 
 def rollback_repair(conn: Connection, repair_id: str) -> dict[str, Any]:
     repair = require_repair(conn, repair_id)
-    if repair["status"] not in {"patch_applied", "verification_failed"}:
+    if repair["status"] not in {"patch_applied", "verified", "verification_failed", "released"}:
         raise ValueError(f"Repair status does not allow rollback: {repair['status']}")
     applied = apply_operations(rollback_operations(repair))
     return finish_repair(conn, repair, "rolled_back", "repair.rolled_back", {"rollback_applied": applied})
@@ -299,6 +300,7 @@ def repair_result(plan: RepairPlan) -> dict[str, Any]:
         **build_patch_set(plan.operations),
         "approved_paths": approved_paths(),
         "path_ownership": path_ownership(plan.operations),
+        "planning_provider": plan.planning_provider,
     }
 
 
@@ -316,7 +318,9 @@ def llm_repair_plan(conn: Connection, incident: dict[str, Any]) -> RepairPlan | 
         return None
     try:
         decision = plan_repair_with_claude(conn, incident, approved_paths())
-        return RepairPlan.model_validate(decision.model_dump())
+        plan = RepairPlan.model_validate(decision.model_dump())
+        plan.planning_provider = "claude"
+        return plan
     except Exception:
         return None
 

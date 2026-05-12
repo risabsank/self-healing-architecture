@@ -231,6 +231,14 @@ cd apps/dashboard
 npm run dev
 ```
 
+Run the incident-specific end-to-end walkthrough for the bad feature flag recovery path:
+
+```bash
+python3 scripts/incidents/bad_feature_flag_recovery.py
+```
+
+See `docs/incidents/bad-feature-flag-recovery.md` for the full operator flow, expected outputs, and troubleshooting notes.
+
 Useful checks:
 
 ```text
@@ -322,7 +330,7 @@ Claude-backed reasoning can be enabled with `LLM_REASONING_ENABLED=true` and `AN
 
 ### Incident Agent
 
-The incident agent is a state machine, not an open-ended chatbot. The current implementation uses deterministic rules over typed evidence; the same interface can later be backed by LangGraph and an LLM provider. It moves through explicit states:
+The incident agent is a state machine, not an open-ended chatbot. It uses typed evidence, hypotheses, memory matches, policy decisions, and mitigation candidates. When `LLM_REASONING_ENABLED=true` and `ANTHROPIC_API_KEY` are configured, the analysis path uses a LangGraph-compatible Claude reasoning flow; otherwise it falls back to deterministic rules so local development and CI remain repeatable. It moves through explicit states:
 
 ```text
 detect_failure
@@ -569,9 +577,9 @@ The canary system releases generated changes gradually. A change should never be
 
 Canary policy:
 
-- Deploy patched artifact to a canary sandbox or canary service instance.
-- Route a small percentage of traffic or synthetic probes to the canary.
-- Compare canary health against baseline health.
+- Release verified changes through a canary-style gate.
+- Route synthetic probes, or limited traffic when an isolated canary target is configured, to the candidate release.
+- Compare candidate health against baseline health.
 - Monitor error rate, latency, crash loops, dependency failures, and regression checks.
 - Promote only if all required health windows pass.
 - Roll back automatically if guardrail thresholds are breached.

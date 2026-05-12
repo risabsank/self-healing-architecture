@@ -21,10 +21,11 @@ def build_patch_set(operations: list[PatchOperation]) -> dict[str, Any]:
     }
 
 
-def apply_operations(operations: list[PatchOperation]) -> list[dict[str, Any]]:
+def apply_operations(operations: list[PatchOperation], previews: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     # All durable repairs pass through this boundary: approved paths only,
     # known owners only, and no arbitrary shell access.
     ensure_operations_are_allowed(operations)
+    ensure_current_hashes_match(previews or [])
     applied = []
     for operation in operations:
         target = resolve_repo_path(operation.path)
@@ -37,6 +38,15 @@ def apply_operations(operations: list[PatchOperation]) -> list[dict[str, Any]]:
             target.write_text(operation.content)
         applied.append(operation_result(operation, previous))
     return applied
+
+
+def ensure_current_hashes_match(previews: list[dict[str, Any]]) -> None:
+    for preview in previews:
+        current = read_approved_file(preview["path"])
+        expected = preview.get("previous_sha256")
+        actual = sha256_text(current)
+        if actual != expected:
+            raise ValueError(f"Repair target changed after preview generation: {preview['path']}")
 
 
 def patch_preview(operation: PatchOperation) -> dict[str, Any]:

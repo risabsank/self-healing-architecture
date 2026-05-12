@@ -274,6 +274,8 @@ def bounded_traffic(value: float) -> float:
 
 def evaluate_rollout_policy(repair: dict[str, Any], traffic_percentage: float) -> PolicyDecision:
     verification = (repair.get("result") or {}).get("ci_cd") or {}
+    # A verified patch with rollback available is still gated, but the canary
+    # decision should represent rollout risk rather than re-litigating patch risk.
     return evaluate_policy(
         capability="canary_rollout",
         action_type="synthetic_probe_canary",
@@ -281,7 +283,7 @@ def evaluate_rollout_policy(repair: dict[str, Any], traffic_percentage: float) -
         evidence_count=1 if verification.get("status") == "passed" else 0,
         rollback_available=True,
         blast_radius="low",
-        max_autonomous_risk=0.5,
+        max_autonomous_risk=0.75,
     )
 
 

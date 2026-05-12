@@ -2,7 +2,7 @@
 
 The incident agent turns an unhealthy service observation into structured operational analysis.
 
-It currently runs as a deterministic state machine inside the control API. The implementation is intentionally typed and auditable so it can later be backed by LangGraph or an LLM provider without changing the public behavior.
+It runs as a typed state machine inside the control API. In production-like runs it can call Claude through a LangGraph-compatible reasoning path; in local development and CI it falls back to deterministic rules so the behavior remains repeatable without external credentials.
 
 ## Responsibilities
 

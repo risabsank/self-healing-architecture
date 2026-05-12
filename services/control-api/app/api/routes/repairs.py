@@ -42,6 +42,41 @@ def read_repair(repair_id: str, conn: Connection = Depends(get_connection)):
     return repair
 
 
+@router.get("/releases")
+def list_releases(conn: Connection = Depends(get_connection)):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM repair_changes
+            WHERE status IN ('verified', 'released', 'rolled_back', 'quarantined')
+            ORDER BY updated_at DESC
+            LIMIT 100
+            """
+        )
+        return {"releases": cur.fetchall()}
+
+
+@router.get("/releases/{release_id}")
+def read_release(release_id: str, conn: Connection = Depends(get_connection)):
+    return read_repair(release_id, conn)
+
+
+@router.get("/releases/{release_id}/checks")
+def read_release_checks(release_id: str, conn: Connection = Depends(get_connection)):
+    return get_repair_verification_runs(release_id, conn)
+
+
+@router.post("/releases/{release_id}/approve")
+def approve_release(release_id: str, conn: Connection = Depends(get_connection)):
+    return rollout_or_error(conn, release_id, 10.0)
+
+
+@router.post("/releases/{release_id}/rollback")
+def rollback_release(release_id: str, conn: Connection = Depends(get_connection)):
+    return rollback_repair_change(release_id, conn)
+
+
 @router.post("/repairs/{repair_id}/approve")
 def approve_repair_change(repair_id: str, conn: Connection = Depends(get_connection)):
     return repair_or_error(approve_repair, conn, repair_id)

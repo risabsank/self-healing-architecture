@@ -197,7 +197,8 @@ ALTER TABLE incident_memories
   ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS verification_result JSONB,
   ADD COLUMN IF NOT EXISTS repair_change JSONB,
-  ADD COLUMN IF NOT EXISTS rollout_result JSONB;
+  ADD COLUMN IF NOT EXISTS rollout_result JSONB,
+  ADD COLUMN IF NOT EXISTS embedding vector(1536);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
   ON incident_memories (incident_id)

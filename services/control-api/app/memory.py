@@ -1,4 +1,5 @@
 from typing import Any
+from hashlib import blake2b
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
@@ -10,16 +11,19 @@ SELECT id, incident_id, summary, symptoms, root_cause,
        successful_action, failed_actions, verification_result, repair_change, rollout_result, created_at
 FROM incident_memories
 """
+VECTOR_DIMENSIONS = 1536
 
 
 def ensure_memory_schema(conn: Connection) -> None:
     # Keeps local Docker volumes compatible as the lightweight schema evolves.
     with conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS symptoms JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS verification_result JSONB")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS repair_change JSONB")
         cur.execute("ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS rollout_result JSONB")
+        cur.execute(f"ALTER TABLE incident_memories ADD COLUMN IF NOT EXISTS embedding vector({VECTOR_DIMENSIONS})")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_memories_incident_id
@@ -105,15 +109,16 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
     verification = (successful_action or {}).get("result", {}).get("execution", {}).get("verification")
     symptoms = extract_symptoms(evidence)
     summary = incident["final_summary"] or summarize_memory(incident, symptoms, successful_action)
+    searchable_text = memory_text(summary, incident["root_cause"], symptoms)
 
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO incident_memories (
               incident_id, summary, symptoms, evidence, root_cause,
-              successful_action, failed_actions, verification_result, repair_change, rollout_result
+              successful_action, failed_actions, verification_result, repair_change, rollout_result, embedding
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector)
             ON CONFLICT (incident_id) WHERE incident_id IS NOT NULL
             DO UPDATE SET
               summary = EXCLUDED.summary,
@@ -124,7 +129,8 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
               failed_actions = EXCLUDED.failed_actions,
               verification_result = EXCLUDED.verification_result,
               repair_change = EXCLUDED.repair_change,
-              rollout_result = EXCLUDED.rollout_result
+              rollout_result = EXCLUDED.rollout_result,
+              embedding = EXCLUDED.embedding
             RETURNING id, incident_id, summary, symptoms, root_cause, successful_action, failed_actions, verification_result, repair_change, rollout_result, created_at
             """,
             (
@@ -138,6 +144,7 @@ def write_incident_memory(conn: Connection, incident_id: str) -> dict[str, Any] 
                 Jsonb(verification),
                 Jsonb(serialize_repair_change(repair_change) if repair_change else None),
                 Jsonb(serialize_rollout_result(rollout_result) if rollout_result else None),
+                vector_literal(text_embedding(searchable_text)),
             ),
         )
         memory = cur.fetchone()
@@ -171,12 +178,28 @@ def search_memories(conn: Connection, query: str, limit: int = 10) -> list[dict[
     if not query_terms:
         return []
 
+    rows = fetch_all(
+        conn,
+        """
+        SELECT id, incident_id, summary, symptoms, root_cause,
+               successful_action, failed_actions, verification_result, repair_change, rollout_result, created_at,
+               1 - (embedding <=> %s::vector) AS vector_score
+        FROM incident_memories
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+        """,
+        (vector_literal(text_embedding(query)), vector_literal(text_embedding(query)), limit),
+    )
+    if rows:
+        return [
+            {**serialize_memory(row), "similarity_score": round(float(row["vector_score"]), 3), "retrieval": "pgvector"}
+            for row in rows
+            if row["vector_score"] is not None
+        ]
+
     scored = [(memory_score(query_terms, memory), memory) for memory in list_memories(conn, 100)]
-    return [
-        {**memory, "similarity_score": score}
-        for score, memory in sorted(scored, key=lambda item: item[0], reverse=True)
-        if score > 0
-    ][:limit]
+    return [{**memory, "similarity_score": score, "retrieval": "lexical"} for score, memory in sorted(scored, key=lambda item: item[0], reverse=True) if score > 0][:limit]
 
 
 def serialize_memory(memory: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +266,25 @@ def item_summary(content: dict[str, Any]) -> str:
 def summarize_memory(incident: dict[str, Any], symptoms: list[dict[str, Any]], action: dict[str, Any] | None) -> str:
     action_type = action["action_type"] if action else "no successful action"
     return f"{incident['root_cause'] or incident['title']} recovered with {action_type}; symptoms: {len(symptoms)}."
+
+
+def memory_text(summary: str, root_cause: str | None, symptoms: list[dict[str, Any]]) -> str:
+    return " ".join([summary, root_cause or "", str(symptoms)])
+
+
+def text_embedding(text: str) -> list[float]:
+    vector = [0.0] * VECTOR_DIMENSIONS
+    for token in tokenize(text):
+        digest = blake2b(token.encode(), digest_size=8).digest()
+        bucket = int.from_bytes(digest[:4], "big") % VECTOR_DIMENSIONS
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[bucket] += sign
+    norm = sum(value * value for value in vector) ** 0.5 or 1.0
+    return [round(value / norm, 6) for value in vector]
+
+
+def vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(str(value) for value in vector) + "]"
 
 
 def evidence_text(item: Any) -> str:
