@@ -14,6 +14,10 @@ class IncidentCreate(BaseModel):
     sandbox_id: str
     title: str
     status: Literal["detected", "investigating", "resolved", "failed", "blocked"] = "detected"
+    app_id: str | None = None
+    service_name: str | None = None
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    trigger_source: str = "manual"
 
 
 class HealthCheckResult(BaseModel):
@@ -69,6 +73,22 @@ class RepairPolicyManifest(BaseModel):
     rollback_strategy: str = "Apply generated rollback operations."
 
 
+class MetricSourceManifest(BaseModel):
+    name: str
+    description: str | None = None
+    unit: str | None = None
+
+
+class SloTargetManifest(BaseModel):
+    name: str
+    metric: str
+    target: float
+    comparator: Literal["<=", ">=", "<", ">", "=="] = "<="
+    window: str = "5m"
+    severity: Literal["low", "medium", "high", "critical"] = "high"
+    description: str | None = None
+
+
 class ApplicationManifest(BaseModel):
     app_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
     display_name: str
@@ -83,3 +103,21 @@ class ApplicationManifest(BaseModel):
     repo: dict[str, Any] = Field(default_factory=dict)
     verification: dict[str, Any] = Field(default_factory=dict)
     canary: dict[str, Any] = Field(default_factory=dict)
+    metric_sources: list[MetricSourceManifest] = Field(default_factory=list)
+    slo_targets: list[SloTargetManifest] = Field(default_factory=list)
+
+
+class MetricObservationCreate(BaseModel):
+    metric_name: str
+    value: float
+    unit: str | None = None
+    source: str = "api"
+    labels: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperatorNoteCreate(BaseModel):
+    note: str = Field(min_length=3)
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    service_name: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    metric_refs: list[str] = Field(default_factory=list)

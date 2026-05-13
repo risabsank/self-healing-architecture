@@ -30,7 +30,9 @@ def ensure_incident_for_unhealthy_check(
 
     sandbox_id = health_result["sandbox_id"]
     service_name = health_result["service_name"]
-    existing = find_open_incident(conn, sandbox_id)
+    service_metadata = service_metadata_for(conn, sandbox_id, service_name)
+    app_id = service_metadata.get("app_id")
+    existing = find_open_incident(conn, sandbox_id, "healthcheck")
 
     if existing:
         record_incident_event(
@@ -47,11 +49,11 @@ def ensure_incident_for_unhealthy_check(
         title = f"{service_name} is unhealthy"
         cur.execute(
             """
-            INSERT INTO incidents (sandbox_id, status, title)
-            VALUES (%s, 'detected', %s)
-            RETURNING id, sandbox_id, status, title, detected_at
+            INSERT INTO incidents (sandbox_id, app_id, service_name, severity, trigger_source, status, title)
+            VALUES (%s, %s, %s, 'high', 'healthcheck', 'detected', %s)
+            RETURNING id, sandbox_id, app_id, service_name, severity, trigger_source, status, title, detected_at
             """,
-            (sandbox_id, title),
+            (sandbox_id, app_id, service_name, title),
         )
         incident = cur.fetchone()
 
@@ -63,6 +65,9 @@ def ensure_incident_for_unhealthy_check(
         actor="monitor",
         payload={
             "title": title,
+            "app_id": app_id,
+            "service_name": service_name,
+            "severity": "high",
             "trigger": "healthcheck.unhealthy",
             "health_check": health_result,
         },
@@ -86,7 +91,7 @@ def record_recovery_observation(conn: Connection, health_result: dict[str, Any])
         return
 
     sandbox_id = health_result["sandbox_id"]
-    incident = find_open_incident(conn, sandbox_id)
+    incident = find_open_incident(conn, sandbox_id, "healthcheck")
     if incident:
         with conn.cursor() as cur:
             cur.execute(
@@ -109,19 +114,40 @@ def record_recovery_observation(conn: Connection, health_result: dict[str, Any])
         )
 
 
-def find_open_incident(conn: Connection, sandbox_id: str) -> dict[str, Any] | None:
+def find_open_incident(conn: Connection, sandbox_id: str, trigger_source: str | None = None) -> dict[str, Any] | None:
+    trigger_filter = "AND trigger_source = %s" if trigger_source else ""
+    params: tuple[Any, ...] = (sandbox_id, list(OPEN_INCIDENT_STATUSES))
+    if trigger_source:
+        params = (*params, trigger_source)
+
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT id, status, title
             FROM incidents
-            WHERE sandbox_id = %s AND status = ANY(%s)
+            WHERE sandbox_id = %s
+              AND status = ANY(%s)
+              {trigger_filter}
             ORDER BY detected_at DESC
             LIMIT 1
             """,
-            (sandbox_id, list(OPEN_INCIDENT_STATUSES)),
+            params,
         )
         return cur.fetchone()
+
+
+def service_metadata_for(conn: Connection, sandbox_id: str, service_name: str) -> dict[str, Any]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT metadata
+            FROM sandbox_services
+            WHERE sandbox_id = %s AND service_name = %s
+            """,
+            (sandbox_id, service_name),
+        )
+        row = cur.fetchone()
+    return row["metadata"] if row else {}
 
 
 async def check_service_health(

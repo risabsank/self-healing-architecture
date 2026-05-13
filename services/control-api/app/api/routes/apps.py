@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+import yaml
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 from psycopg import Connection
 
-from app.apps import get_application, list_applications, register_application
+from app.app_signals import latest_metrics, latest_notes, record_metric, record_note, slo_status
+from app.apps import get_application, list_applications, manifest_from_app, register_application, validate_manifest_readiness
 from app.core.db import get_connection
-from app.models.schemas import ApplicationManifest
+from app.models.schemas import ApplicationManifest, MetricObservationCreate, OperatorNoteCreate
 from app.monitoring import check_service_health
 
 router = APIRouter(prefix="/apps", tags=["applications"])
@@ -19,6 +22,21 @@ def register_app(manifest: ApplicationManifest, conn: Connection = Depends(get_c
     return register_application(conn, manifest)
 
 
+@router.post("/register-yaml", status_code=201)
+async def register_app_yaml(request: Request, conn: Connection = Depends(get_connection)):
+    return register_application(conn, await manifest_from_yaml_request(request))
+
+
+@router.post("/validate")
+def validate_app_manifest(manifest: ApplicationManifest):
+    return validate_manifest_readiness(manifest)
+
+
+@router.post("/validate-yaml")
+async def validate_app_manifest_yaml(request: Request):
+    return validate_manifest_readiness(await manifest_from_yaml_request(request))
+
+
 @router.get("/{app_id}")
 def read_app(app_id: str, conn: Connection = Depends(get_connection)):
     app = get_application(conn, app_id)
@@ -27,11 +45,45 @@ def read_app(app_id: str, conn: Connection = Depends(get_connection)):
     return app
 
 
+@router.get("/{app_id}/validation")
+def read_app_validation(app_id: str, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    return validate_manifest_readiness(manifest_from_app(app))
+
+
+@router.post("/{app_id}/metrics", status_code=201)
+def ingest_metric(app_id: str, payload: MetricObservationCreate, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    return record_metric(conn, app, payload)
+
+
+@router.get("/{app_id}/metrics")
+def read_metrics(app_id: str, conn: Connection = Depends(get_connection)):
+    require_app(conn, app_id)
+    return latest_metrics(conn, app_id)
+
+
+@router.get("/{app_id}/slo-status")
+def read_slo_status(app_id: str, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    return slo_status(conn, app)
+
+
+@router.post("/{app_id}/notes", status_code=201)
+def create_operator_note(app_id: str, payload: OperatorNoteCreate, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    return record_note(conn, app, payload)
+
+
+@router.get("/{app_id}/notes")
+def read_operator_notes(app_id: str, conn: Connection = Depends(get_connection)):
+    require_app(conn, app_id)
+    return {"notes": latest_notes(conn, app_id)}
+
+
 @router.post("/{app_id}/health-check")
 async def run_app_health_check(app_id: str, conn: Connection = Depends(get_connection)):
-    app = get_application(conn, app_id)
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
+    app = require_app(conn, app_id)
 
     results = []
     for service in app["manifest"].get("services", []):
@@ -45,3 +97,24 @@ async def run_app_health_check(app_id: str, conn: Connection = Depends(get_conne
                 )
             )
     return {"app_id": app_id, "results": results}
+
+
+def require_app(conn: Connection, app_id: str):
+    app = get_application(conn, app_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+
+
+async def manifest_from_yaml_request(request: Request) -> ApplicationManifest:
+    body = (await request.body()).decode("utf-8")
+    try:
+        parsed = yaml.safe_load(body)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="Manifest YAML must define an object at the top level.")
+    try:
+        return ApplicationManifest.model_validate(parsed)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc

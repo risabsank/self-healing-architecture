@@ -1,0 +1,20 @@
+services:
+  web:
+    build:
+      context: ./web
+    environment:
+      APP_NAME: my-compose-app
+    ports:
+      - "8080:8080"
+
+  web-adapter:
+    build:
+      context: ./adapter
+    environment:
+      APP_ID: my-compose-app
+      SERVICE_NAME: web
+      WEB_BASE_URL: http://web:8080
+    ports:
+      - "8011:8010"
+    depends_on:
+      - web

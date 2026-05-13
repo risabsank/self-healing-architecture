@@ -29,6 +29,31 @@ DEFAULT_APP_MANIFEST = {
         {"name": "items", "service": "target-api", "path": "/items"},
         {"name": "checkout", "service": "target-api", "path": "/checkout"},
     ],
+    "metric_sources": [
+        {"name": "availability", "description": "Fraction of successful user-visible probes.", "unit": "ratio"},
+        {"name": "latency_p95_ms", "description": "95th percentile user-visible request latency.", "unit": "ms"},
+        {"name": "error_rate", "description": "Fraction of failed user-visible requests.", "unit": "ratio"},
+    ],
+    "slo_targets": [
+        {
+            "name": "checkout-latency",
+            "metric": "latency_p95_ms",
+            "target": 500,
+            "comparator": "<=",
+            "window": "5m",
+            "severity": "high",
+            "description": "Checkout p95 latency should remain below 500ms.",
+        },
+        {
+            "name": "user-visible-error-rate",
+            "metric": "error_rate",
+            "target": 0.02,
+            "comparator": "<=",
+            "window": "5m",
+            "severity": "critical",
+            "description": "User-visible errors should stay below 2%.",
+        },
+    ],
     "safe_actions": [
         {
             "action_type": "SET_ENV_VAR",
@@ -126,6 +151,64 @@ def ensure_app_schema(conn: Connection) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_applications_sandbox ON applications (sandbox_id, status)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_metric_observations (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+              metric_name TEXT NOT NULL,
+              value DOUBLE PRECISION NOT NULL,
+              unit TEXT,
+              source TEXT NOT NULL,
+              labels JSONB NOT NULL DEFAULT '{}'::jsonb,
+              observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_slo_evaluations (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+              slo_name TEXT NOT NULL,
+              metric_name TEXT NOT NULL,
+              status TEXT NOT NULL,
+              target DOUBLE PRECISION NOT NULL,
+              observed_value DOUBLE PRECISION NOT NULL,
+              comparator TEXT NOT NULL,
+              slo_window TEXT NOT NULL,
+              observation_id UUID REFERENCES app_metric_observations(id) ON DELETE SET NULL,
+              incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
+              detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+              evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_operator_notes (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+              sandbox_id TEXT NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
+              service_name TEXT,
+              severity TEXT NOT NULL,
+              note TEXT NOT NULL,
+              tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+              metric_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+              incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_app_metrics_app_observed ON app_metric_observations (app_id, observed_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_app_slo_app_evaluated ON app_slo_evaluations (app_id, evaluated_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_app_notes_app_created ON app_operator_notes (app_id, created_at DESC)")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS app_id TEXT")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS service_name TEXT")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT 'medium'")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS trigger_source TEXT NOT NULL DEFAULT 'unknown'")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_incidents_app_open ON incidents (app_id, service_name, status, detected_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_incidents_trigger_source ON incidents (trigger_source, detected_at DESC)")
     conn.commit()
     register_application(conn, ApplicationManifest.model_validate(DEFAULT_APP_MANIFEST))
 
@@ -243,6 +326,46 @@ def app_probes(manifest: ApplicationManifest | None, section: str) -> list[dict[
     if section == "verification":
         return list((manifest.verification or {}).get("probes") or [])
     return [probe.model_dump() for probe in manifest.critical_probes]
+
+
+def validate_manifest_readiness(manifest: ApplicationManifest) -> dict[str, Any]:
+    services = {service.name: service for service in manifest.services}
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, ok: bool, message: str) -> None:
+        checks.append({"name": name, "ok": ok, "message": message})
+
+    add("services", bool(manifest.services), "At least one service is declared.")
+    add("health_checks", bool(manifest.health_checks), "At least one health check is declared.")
+    add("critical_probes", bool(manifest.critical_probes), "At least one user-visible critical probe is declared.")
+    add("safe_actions", bool(manifest.safe_actions), "At least one bounded safe action is declared.")
+    add("metric_sources", bool(manifest.metric_sources), "At least one metric source is declared.")
+    add("slo_targets", bool(manifest.slo_targets), "At least one SLO target is declared.")
+    add("repair_policy", bool(manifest.repair_policy.approved_paths and manifest.repair_policy.test_commands), "Repair policy declares approved paths and test commands.")
+    add("canary", bool((manifest.canary or {}).get("probes")), "Canary probes are declared.")
+
+    for service in manifest.services:
+        add(f"service:{service.name}:health_url", bool(service.health_url), f"{service.name} has a health URL.")
+        add(f"service:{service.name}:adapter_url", bool(service.adapter_url), f"{service.name} has a sidecar adapter URL.")
+
+    for probe in [*manifest.health_checks, *manifest.critical_probes]:
+        add(f"probe:{probe.name}:service", probe.service in services, f"{probe.name} references a declared service.")
+
+    declared_metrics = {metric.name for metric in manifest.metric_sources}
+    for slo in manifest.slo_targets:
+        add(f"slo:{slo.name}:metric", slo.metric in declared_metrics, f"{slo.name} references a declared metric source.")
+
+    for action in manifest.safe_actions:
+        add(f"action:{action.action_type}:service", action.service in services, f"{action.action_type} references a declared service.")
+        add(f"action:{action.action_type}:adapter_path", bool(action.adapter_path), f"{action.action_type} has an adapter path.")
+
+    failures = [check for check in checks if not check["ok"]]
+    return {
+        "app_id": manifest.app_id,
+        "status": "valid" if not failures else "invalid",
+        "checks": checks,
+        "summary": f"{len(checks) - len(failures)}/{len(checks)} readiness checks passed.",
+    }
 
 
 def serialize_app(app: dict[str, Any]) -> dict[str, Any]:

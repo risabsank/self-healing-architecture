@@ -78,7 +78,7 @@ GET  http://localhost:8001/events
 
 ## Current Scope
 
-The current foundation includes deterministic incident diagnosis, but does not execute runtime mitigation, code repair, CI/CD verification, or canary rollout yet. It provides the observable live substrate required by those capabilities:
+The foundation now supports the full local incident-response loop. It provides the observable live substrate used by runtime mitigation, durable repair, CI/CD verification, canary rollout, incident memory, and dashboard replay:
 
 - a control plane,
 - an observable target service,
@@ -88,7 +88,7 @@ The current foundation includes deterministic incident diagnosis, but does not e
 - structured runtime events,
 - incident records opened from unhealthy checks,
 - typed incident-agent evidence, hypotheses, and mitigation candidates,
-- a database schema ready for incidents, evidence, actions, and memory,
-- and a runtime boundary that can later support patch validation and canary deployment.
+- a database schema for incidents, evidence, actions, memory, repairs, verification runs, canary rollouts, metrics, SLO evaluations, and operator notes,
+- and a bounded runtime boundary for sidecar-mediated mitigation and patch validation.
 
 The intended architecture separates immediate recovery from durable improvement. Runtime mitigations restore service quickly, while code and configuration changes should be validated through tests, sandbox replay, and canary rollout before promotion.

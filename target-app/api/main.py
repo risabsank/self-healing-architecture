@@ -7,6 +7,7 @@ from typing import Any
 
 import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from psycopg.rows import dict_row
 from pydantic import BaseModel
 
@@ -133,13 +134,94 @@ def check_database() -> dict[str, Any]:
     return {"ok": True, "latency_ms": latency_ms, "item_count": item_count}
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def root():
-    return {
-        "service": APP_NAME,
-        "message": "Target app is running.",
-        "docs": "/docs",
-    }
+    # This page gives the developer console a real user-facing surface to
+    # preview while the API endpoints remain available for probes.
+    scenarios = ", ".join(sorted(ACTIVE_SCENARIOS)) or "none"
+    checkout_state = "enabled" if FEATURE_CHECKOUT_ENABLED else "disabled"
+    return f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Breakable Commerce</title>
+        <style>
+          body {{
+            margin: 0;
+            background: #f7f8f5;
+            color: #18212d;
+            font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }}
+          main {{
+            display: grid;
+            gap: 18px;
+            margin: 0 auto;
+            max-width: 880px;
+            padding: 36px 28px;
+          }}
+          .hero {{
+            background: #ffffff;
+            border: 1px solid #d8dee4;
+            border-radius: 8px;
+            padding: 28px;
+          }}
+          h1 {{
+            font-size: clamp(30px, 6vw, 54px);
+            line-height: 1;
+            margin: 0 0 10px;
+          }}
+          p {{
+            margin: 0;
+          }}
+          .muted {{
+            color: #657281;
+          }}
+          .grid {{
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          }}
+          .tile {{
+            background: #ffffff;
+            border: 1px solid #d8dee4;
+            border-radius: 8px;
+            padding: 16px;
+          }}
+          .tile strong {{
+            display: block;
+            font-size: 22px;
+          }}
+          .button {{
+            background: #007f73;
+            border-radius: 7px;
+            color: #ffffff;
+            display: inline-block;
+            font-weight: 700;
+            margin-top: 18px;
+            padding: 10px 14px;
+            text-decoration: none;
+          }}
+        </style>
+      </head>
+      <body>
+        <main>
+          <section class="hero">
+            <p class="muted">Reference user application</p>
+            <h1>Breakable Commerce</h1>
+            <p>A small storefront surface used to show what customers experience while Self-Healing Runtime observes and repairs the system behind it.</p>
+            <a class="button" href="/checkout">Check checkout readiness</a>
+          </section>
+          <section class="grid" aria-label="Runtime status">
+            <article class="tile"><span class="muted">Service</span><strong>{APP_NAME}</strong></article>
+            <article class="tile"><span class="muted">Checkout</span><strong>{checkout_state}</strong></article>
+            <article class="tile"><span class="muted">Active failures</span><strong>{scenarios}</strong></article>
+          </section>
+        </main>
+      </body>
+    </html>
+    """
 
 
 @app.get("/metadata")

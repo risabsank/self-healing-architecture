@@ -37,6 +37,33 @@ critical_probes:
     method: GET
     path: /checkout
 
+metric_sources:
+  - name: availability
+    description: Fraction of successful user-visible probes.
+    unit: ratio
+  - name: latency_p95_ms
+    description: 95th percentile user-visible request latency.
+    unit: ms
+  - name: error_rate
+    description: Fraction of failed user-visible requests.
+    unit: ratio
+
+slo_targets:
+  - name: checkout-latency
+    metric: latency_p95_ms
+    target: 500
+    comparator: "<="
+    window: 5m
+    severity: high
+    description: Checkout p95 latency should remain below 500ms.
+  - name: user-visible-error-rate
+    metric: error_rate
+    target: 0.02
+    comparator: "<="
+    window: 5m
+    severity: critical
+    description: User-visible errors should stay below 2%.
+
 safe_actions:
   - action_type: DISABLE_FEATURE_FLAG
     service: target-api

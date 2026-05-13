@@ -4,6 +4,7 @@ const DEFAULT_API = "http://localhost:8000";
 const state = {
   apiBase: localStorage.getItem("controlApiBaseUrl") || DEFAULT_API,
   selectedIncidentId: null,
+  selectedAppId: localStorage.getItem("selectedAppId") || null,
   data: {}
 };
 
@@ -13,13 +14,31 @@ const dom = Object.fromEntries([
   "save-api",
   "refresh",
   "run-health",
+  "run-app-health",
   "reset-scenarios",
   "analyze-incident",
   "execute-selected",
   "run-evaluation",
   "plan-repair",
+  "reload-preview",
+  "open-user-app",
+  "send-sample-metric",
+  "note-form",
+  "note-severity",
+  "note-text",
   "error-banner",
   "status-strip",
+  "app-console-title",
+  "app-console-meta",
+  "user-app-frame",
+  "app-list",
+  "app-probe-list",
+  "system-narrative",
+  "onboarding-list",
+  "slo-list",
+  "slo-history-list",
+  "metric-list",
+  "note-list",
   "sandbox-health",
   "scenario-list",
   "incident-list",
@@ -43,6 +62,10 @@ const BUTTON_ACTIONS = {
   "save-api": () => saveApiBase(),
   refresh: () => refresh(),
   "run-health": () => mutate(`/sandboxes/${SANDBOX_ID}/health-check`),
+  "run-app-health": () => selectedApp((app) => mutate(`/apps/${app.app_id}/health-check`)),
+  "reload-preview": () => reloadPreview(),
+  "open-user-app": () => openUserApp(),
+  "send-sample-metric": () => selectedApp((app) => mutate(`/apps/${app.app_id}/metrics`, sampleMetricPayload())),
   "reset-scenarios": () => mutate(`/sandboxes/${SANDBOX_ID}/scenarios/reset`),
   "run-evaluation": () => mutate("/evaluations/run", { scenarios: ["bad_database_url"], repeats: 1 }),
   "analyze-incident": () => selected((id) => mutate(`/incidents/${id}/analyze`)),
@@ -67,6 +90,7 @@ const DATASET_ACTIONS = {
 
 dom.apiBase.value = state.apiBase;
 document.addEventListener("click", handleClick);
+dom.noteForm.addEventListener("submit", submitNote);
 refresh();
 setInterval(refresh, 10000);
 
@@ -77,6 +101,7 @@ async function handleClick(event) {
   const id = button.id;
   const data = button.dataset;
   if (BUTTON_ACTIONS[id]) return BUTTON_ACTIONS[id]();
+  if (data.app) return selectApp(data.app);
   if (data.incident) return selectAndRefresh(data.incident);
   if (data.scenario) return mutate(`/sandboxes/${SANDBOX_ID}/scenarios/${data.scenario}/${data.next}`);
 
@@ -100,6 +125,17 @@ function selected(callback) {
   return state.selectedIncidentId ? callback(state.selectedIncidentId) : undefined;
 }
 
+function selectedApp(callback) {
+  const app = currentApp();
+  return app ? callback(app) : undefined;
+}
+
+async function selectApp(appId) {
+  state.selectedAppId = appId;
+  localStorage.setItem("selectedAppId", appId);
+  await refresh();
+}
+
 async function mutate(path, body = null) {
   setBusy(true);
   try {
@@ -112,11 +148,28 @@ async function mutate(path, body = null) {
   }
 }
 
+async function submitNote(event) {
+  event.preventDefault();
+  const app = currentApp();
+  const note = dom.noteText.value.trim();
+  if (!app || !note) return;
+
+  await mutate(`/apps/${app.app_id}/notes`, {
+    note,
+    severity: dom.noteSeverity.value,
+    service_name: primaryService(app)?.name || null,
+    tags: ["dashboard"],
+    metric_refs: []
+  });
+  dom.noteText.value = "";
+}
+
 async function refresh() {
   setBusy(true);
   hideError();
   try {
     await loadOverview();
+    chooseApp();
     chooseIncident();
     if (state.selectedIncidentId) await loadIncident(state.selectedIncidentId);
     render();
@@ -129,8 +182,9 @@ async function refresh() {
 }
 
 async function loadOverview() {
-  const [control, sandbox, scenarios, incidents, memories, evaluations] = await Promise.all([
+  const [control, apps, sandbox, scenarios, incidents, memories, evaluations] = await Promise.all([
     api("/health"),
+    api("/apps").catch(() => ({ apps: [] })),
     api(`/sandboxes/${SANDBOX_ID}`),
     api(`/sandboxes/${SANDBOX_ID}/scenarios`),
     api("/incidents"),
@@ -140,12 +194,30 @@ async function loadOverview() {
 
   state.data = {
     control,
+    apps: apps.apps || [],
     sandbox,
     scenarios: normalizeScenarios(scenarios),
     incidents: incidents.incidents || [],
     memories: memories.memories || [],
     evaluations: evaluations.runs || []
   };
+
+  chooseApp();
+  if (state.selectedAppId) {
+    const [metrics, slo, notes, validation] = await Promise.all([
+      api(`/apps/${state.selectedAppId}/metrics`).catch(() => ({ observations: [], slo_evaluations: [] })),
+      api(`/apps/${state.selectedAppId}/slo-status`).catch(() => ({ slo_targets: [] })),
+      api(`/apps/${state.selectedAppId}/notes`).catch(() => ({ notes: [] })),
+      api(`/apps/${state.selectedAppId}/validation`).catch(() => ({ checks: [], status: "unknown" }))
+    ]);
+    Object.assign(state.data, {
+      metrics: metrics.observations || [],
+      sloEvaluations: metrics.slo_evaluations || [],
+      sloTargets: slo.slo_targets || [],
+      notes: notes.notes || [],
+      appValidation: validation
+    });
+  }
 }
 
 async function loadIncident(incidentId) {
@@ -208,8 +280,19 @@ function chooseIncident() {
   state.selectedIncidentId = (incidents.find(isActiveIncident) || incidents[0] || {}).id || null;
 }
 
+function chooseApp() {
+  const apps = state.data.apps || [];
+  if (apps.some((app) => app.app_id === state.selectedAppId)) return;
+  state.selectedAppId = (apps[0] || {}).app_id || null;
+  if (state.selectedAppId) localStorage.setItem("selectedAppId", state.selectedAppId);
+}
+
 function render() {
   renderStatus();
+  renderUserConsole();
+  renderSystemNarrative();
+  renderOnboardingHealth();
+  renderReliabilitySignals();
   renderSandbox();
   renderScenarios();
   renderIncidents();
@@ -230,16 +313,161 @@ function render() {
 function renderStatus() {
   const health = first(state.data.sandbox?.latest_health);
   const incidents = state.data.incidents || [];
+  const app = currentApp();
   const metrics = [
     ["Control API", state.data.control?.status || "unknown", state.apiBase],
+    ["Application", app?.display_name || "No app", app?.environment || "not registered"],
     ["Target Health", health?.status || "unknown", health?.service_name || SANDBOX_ID],
     ["Active Incidents", incidents.filter(isActiveIncident).length, `${incidents.length} total`],
-    ["Memory Records", state.data.memories?.length || 0, "retrievable incidents"],
     ["Last Refresh", new Date().toLocaleTimeString(), "local operator time"]
   ];
   dom.statusStrip.innerHTML = metrics.map(([label, value, help]) => `
     <div class="metric"><span>${safe(label)}</span><strong>${safe(value)}</strong><span>${safe(help)}</span></div>
   `).join("");
+}
+
+function renderUserConsole() {
+  const app = currentApp();
+  const service = primaryService(app);
+  const previewUrl = service?.public_url || service?.base_url || "";
+
+  dom.appConsoleTitle.textContent = app?.display_name || "Application Preview";
+  dom.appConsoleMeta.textContent = app
+    ? `${app.app_id} · ${app.environment} · ${previewUrl || "no public URL configured"}`
+    : "Register an application manifest to show the user-facing site here.";
+
+  if (previewUrl && dom.userAppFrame.dataset.src !== previewUrl) {
+    dom.userAppFrame.src = previewUrl;
+    dom.userAppFrame.dataset.src = previewUrl;
+  }
+  if (!previewUrl) {
+    dom.userAppFrame.removeAttribute("src");
+    delete dom.userAppFrame.dataset.src;
+  }
+
+  renderCollection("appList", state.data.apps || [], renderAppButton, "No applications registered");
+  renderCollection("appProbeList", appProbes(app), renderProbe, "No critical probes declared");
+  dom.runAppHealth.disabled = !app;
+  dom.reloadPreview.disabled = !previewUrl;
+  dom.openUserApp.disabled = !previewUrl;
+}
+
+function renderReliabilitySignals() {
+  renderCollection("sloList", state.data.sloTargets || [], renderSloTarget, "No SLO targets declared");
+  renderCollection("sloHistoryList", (state.data.sloEvaluations || []).slice(0, 5), renderSloEvaluation, "No SLO evaluations yet");
+  renderCollection("metricList", (state.data.metrics || []).slice(0, 5), renderMetric, "No metric observations yet");
+  renderCollection("noteList", state.data.notes || [], renderNote, "No operator notes yet");
+  dom.sendSampleMetric.disabled = !currentApp();
+}
+
+function renderOnboardingHealth() {
+  const validation = state.data.appValidation;
+  if (!validation) return setHtml("onboardingList", empty("No manifest validation data"));
+  renderCollection("onboardingList", validation.checks || [], (check) => card(`
+    <div class="row"><strong>${safe(labelize(check.name))}</strong>${pill(check.ok ? "ok" : "missing")}</div>
+    <p class="muted">${safe(check.message)}</p>
+  `), "No manifest validation checks");
+}
+
+function renderSloTarget(slo) {
+  const latest = slo.latest;
+  const value = latest ? `${latest.observed_value} ${slo.comparator} ${slo.target}` : `${slo.comparator} ${slo.target}`;
+  return card(`
+    <div class="row"><strong>${safe(slo.name)}</strong>${pill(slo.status)}</div>
+    <p class="muted">${safe(slo.metric)} · ${safe(value)} · ${safe(slo.window)}</p>
+    ${slo.description ? `<p>${safe(slo.description)}</p>` : ""}
+  `);
+}
+
+function renderMetric(metric) {
+  return card(`
+    <div class="row"><strong>${safe(metric.metric_name)}</strong><span class="muted">${date(metric.observed_at)}</span></div>
+    <p>${safe(metric.value)} ${safe(metric.unit || "")}</p>
+    <p class="muted">${safe(metric.source)}</p>
+  `);
+}
+
+function renderSloEvaluation(evaluation) {
+  const incidentLink = evaluation.incident_id ? ` · incident ${String(evaluation.incident_id).slice(0, 8)}` : "";
+  return card(`
+    <div class="row"><strong>${safe(evaluation.slo_name)}</strong>${pill(evaluation.status)}</div>
+    <p class="muted">${safe(evaluation.observed_value)} ${safe(evaluation.comparator)} ${safe(evaluation.target)} · ${date(evaluation.evaluated_at)}${safe(incidentLink)}</p>
+  `);
+}
+
+function renderNote(note) {
+  return card(`
+    <div class="row"><strong>${safe(note.severity)}</strong>${note.incident_id ? pill("incident created") : pill("recorded")}</div>
+    <p>${safe(note.note)}</p>
+    <p class="muted">${date(note.created_at)}${note.service_name ? ` · ${safe(note.service_name)}` : ""}</p>
+  `);
+}
+
+function sampleMetricPayload() {
+  return {
+    metric_name: "latency_p95_ms",
+    value: 850,
+    unit: "ms",
+    source: "dashboard-sample",
+    labels: { route: "/checkout" }
+  };
+}
+
+function renderAppButton(app) {
+  const selected = app.app_id === state.selectedAppId ? " active" : "";
+  return `
+    <button class="app-button${selected}" type="button" data-app="${safe(app.app_id)}">
+      <div class="row"><strong>${safe(app.display_name)}</strong>${pill(app.status)}</div>
+      <p class="muted">${safe(app.app_id)} · ${safe(app.environment)}</p>
+    </button>
+  `;
+}
+
+function renderProbe(probe) {
+  return card(`
+    <div class="row"><strong>${safe(probe.name)}</strong><span class="muted">${safe(probe.method || "GET")}</span></div>
+    <p class="muted">${safe(probe.service)}${safe(probe.path)}</p>
+  `);
+}
+
+function renderSystemNarrative() {
+  const incident = state.data.incident;
+  const actions = state.data.actions || [];
+  const repairs = state.data.repairs || [];
+  const latestAction = actions[0];
+  const latestRepair = repairs[0];
+  const health = first(state.data.sandbox?.latest_health);
+
+  const lines = [
+    narrativeStep("Application", currentApp()?.display_name || "No app registered", currentApp() ? "Manifest loaded with probes, safe actions, and repair policy." : "Use /apps/register to onboard a website."),
+    narrativeStep("Health", health?.status || "unknown", health?.detail?.active_scenarios?.length ? `Active scenario: ${health.detail.active_scenarios.join(", ")}` : "No active scenario reported."),
+    narrativeStep("Incident", incident?.status || "none selected", incident?.root_cause || incident?.title || "No active diagnosis selected."),
+    narrativeStep("Mitigation", latestAction?.status || "not selected", latestAction ? `${labelize(latestAction.action_type)} · risk ${Number(latestAction.risk_score || 0).toFixed(2)}` : "The agent has not selected an action."),
+    narrativeStep("Durable Repair", latestRepair?.status || "not planned", latestRepair?.patch_summary || "No code/config repair has been proposed yet.")
+  ];
+
+  setHtml("systemNarrative", lines.join(""));
+}
+
+function narrativeStep(label, value, detail) {
+  return `
+    <div class="narrative-step">
+      <span>${safe(label)}</span>
+      <strong>${safe(value)}</strong>
+      <p>${safe(detail)}</p>
+    </div>
+  `;
+}
+
+function reloadPreview() {
+  const frame = dom.userAppFrame;
+  if (frame.src) frame.src = frame.src;
+}
+
+function openUserApp() {
+  const service = primaryService(currentApp());
+  const url = service?.public_url || service?.base_url;
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function renderSandbox() {
@@ -285,7 +513,8 @@ function renderIncidents() {
   renderCollection("incidentList", state.data.incidents, (incident) => `
     <button class="incident-button ${incident.id === state.selectedIncidentId ? "active" : ""}" type="button" data-incident="${incident.id}">
       <div class="row"><strong>${safe(incident.title || "Incident")}</strong>${pill(incident.status)}</div>
-      <p class="muted">${date(incident.detected_at)} · ${safe(incident.root_cause || "root cause pending")}</p>
+      <p class="muted">${safe(incident.trigger_source || "unknown")} · ${safe(incident.severity || "medium")} · ${date(incident.detected_at)}</p>
+      <p class="muted">${safe(incident.root_cause || "root cause pending")}</p>
     </button>
   `, "No incidents recorded");
 }
@@ -320,6 +549,7 @@ function renderIncidentHeader() {
       </div>
       ${pill(incident.status)}
     </div>
+    <p class="muted">${safe(incident.trigger_source || "unknown")} · ${safe(incident.severity || "medium")} · ${safe(incident.app_id || "unscoped app")} · ${safe(incident.service_name || "unscoped service")}</p>
     <p class="muted">${date(incident.detected_at)} · ${safe(incident.root_cause || "root cause pending")}</p>
     ${incident.final_summary ? `<p>${safe(incident.final_summary)}</p>` : ""}
   `);
@@ -617,6 +847,18 @@ function first(list = []) {
   return list[0];
 }
 
+function currentApp() {
+  return (state.data.apps || []).find((app) => app.app_id === state.selectedAppId) || null;
+}
+
+function primaryService(app) {
+  return first(app?.manifest?.services || []);
+}
+
+function appProbes(app) {
+  return app?.manifest?.critical_probes || app?.manifest?.health_checks || [];
+}
+
 function camel(text) {
   return text.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 }
@@ -641,7 +883,17 @@ function hideError() {
 }
 
 function setBusy(busy) {
-  [dom.refresh, dom.runHealth, dom.resetScenarios, dom.analyzeIncident, dom.executeSelected, dom.runEvaluation, dom.planRepair].forEach((button) => {
+  [
+    dom.refresh,
+    dom.runHealth,
+    dom.runAppHealth,
+    dom.sendSampleMetric,
+    dom.resetScenarios,
+    dom.analyzeIncident,
+    dom.executeSelected,
+    dom.runEvaluation,
+    dom.planRepair
+  ].forEach((button) => {
     button.disabled = busy;
   });
 }

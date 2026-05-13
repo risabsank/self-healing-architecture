@@ -211,6 +211,7 @@ def set_incident_status(conn: Connection, incident_id: str, status: str) -> None
 def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
     evidence: list[Evidence] = []
     app = get_application_for_sandbox(conn, sandbox_id)
+    app_id = app["app_id"] if app else None
 
     with conn.cursor() as cur:
         cur.execute(
@@ -247,6 +248,34 @@ def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
             (sandbox_id,),
         )
         runtime_events = cur.fetchall()
+
+        slo_evaluations = []
+        operator_notes = []
+        if app_id:
+            cur.execute(
+                """
+                SELECT slo_name, metric_name, status, target, observed_value, comparator,
+                       slo_window AS window, incident_id, detail, evaluated_at
+                FROM app_slo_evaluations
+                WHERE app_id = %s
+                ORDER BY evaluated_at DESC
+                LIMIT 5
+                """,
+                (app_id,),
+            )
+            slo_evaluations = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT service_name, severity, note, tags, metric_refs, incident_id, created_at
+                FROM app_operator_notes
+                WHERE app_id = %s
+                ORDER BY created_at DESC
+                LIMIT 5
+                """,
+                (app_id,),
+            )
+            operator_notes = cur.fetchall()
 
     if health_checks:
         latest = health_checks[0]
@@ -320,10 +349,43 @@ def collect_evidence(conn: Connection, sandbox_id: str) -> list[Evidence]:
                         "environment": app["environment"],
                         "services": manifest.get("services", []),
                         "critical_probes": manifest.get("critical_probes", []),
+                        "metric_sources": manifest.get("metric_sources", []),
+                        "slo_targets": manifest.get("slo_targets", []),
                         "safe_actions": manifest.get("safe_actions", []),
                         "repair_policy": manifest.get("repair_policy", {}),
                     },
                 confidence=0.9,
+            )
+        )
+
+    for evaluation in slo_evaluations:
+        if evaluation["status"] == "breached":
+            evidence.append(
+                Evidence(
+                    source="metric_slo",
+                    kind="slo_breach",
+                    summary=f"{evaluation['slo_name']} breached: {evaluation['metric_name']}={evaluation['observed_value']} {evaluation['comparator']} {evaluation['target']}",
+                    content={
+                        **evaluation,
+                        "evaluated_at": evaluation["evaluated_at"].isoformat(),
+                        "incident_id": str(evaluation["incident_id"]) if evaluation.get("incident_id") else None,
+                    },
+                    confidence=0.86,
+                )
+            )
+
+    for note in operator_notes:
+        evidence.append(
+            Evidence(
+                source="operator_note",
+                kind=f"operator_note:{note['severity']}",
+                summary=f"Operator note ({note['severity']}): {note['note']}",
+                content={
+                    **note,
+                    "created_at": note["created_at"].isoformat(),
+                    "incident_id": str(note["incident_id"]) if note.get("incident_id") else None,
+                },
+                confidence=0.72 if note["severity"] in {"info", "low"} else 0.84,
             )
         )
 
@@ -397,6 +459,16 @@ def generate_fallback_hypotheses(evidence: list[Evidence]) -> list[Hypothesis]:
             )
         ]
 
+    if "slo" in joined or "latency" in joined or "error rate" in joined or "operator note" in joined:
+        return [
+            Hypothesis(
+                cause="User-visible service degradation",
+                evidence_indexes=list(range(min(len(evidence), 4))),
+                confidence=0.66,
+                rationale_summary="Recent SLO or operator-note evidence indicates user-visible degradation even if core health is still passing.",
+            )
+        ]
+
     return [
         Hypothesis(
             cause="Unknown service health regression",
@@ -433,16 +505,19 @@ def propose_mitigations(hypotheses: list[Hypothesis], evidence: list[Evidence]) 
             candidates.append(memory_candidate)
 
     if not candidates and hypotheses:
-        candidates.append(
-            MitigationCandidate(
-                action_type="RESTART_SERVICE",
-                params={"service": "target-api"},
-                expected_effect="Attempt a low-risk restart for an unknown service health regression.",
-                risk_score=0.25,
-                requires_approval=False,
-                rank=1,
+        restart = manifest_safe_action(evidence, "RESTART_SERVICE")
+        service_name = restart.get("service") if restart else primary_service_from_evidence(evidence)
+        if restart and service_name:
+            candidates.append(
+                MitigationCandidate(
+                    action_type="RESTART_SERVICE",
+                    params={"service": service_name},
+                    expected_effect="Attempt the app-declared low-risk restart for an unknown service health regression.",
+                    risk_score=min(float(restart.get("max_autonomous_risk") or 0.25), 0.35),
+                    requires_approval=bool(restart.get("approval_required", False)),
+                    rank=1,
+                )
             )
-        )
 
     return candidates
 
@@ -472,6 +547,23 @@ def mitigation_from_memory(evidence: list[Evidence]) -> MitigationCandidate | No
                 rank=1,
             )
     return None
+
+
+def manifest_safe_action(evidence: list[Evidence], action_type: str) -> dict[str, Any] | None:
+    manifest = next((item.content for item in evidence if item.source == "app_manifest"), {})
+    for action in manifest.get("safe_actions") or []:
+        if action.get("action_type") == action_type:
+            return action
+    return None
+
+
+def primary_service_from_evidence(evidence: list[Evidence]) -> str | None:
+    for item in evidence:
+        if item.source == "service_metadata" and item.content.get("service_name"):
+            return item.content["service_name"]
+    manifest = next((item.content for item in evidence if item.source == "app_manifest"), {})
+    services = manifest.get("services") or []
+    return services[0].get("name") if services else None
 
 
 def select_mitigation(candidates: list[MitigationCandidate]) -> MitigationCandidate | None:

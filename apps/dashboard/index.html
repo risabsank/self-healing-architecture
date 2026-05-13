@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Self-Healing Runtime Operator Dashboard</title>
+    <title>Self-Healing Runtime Consoles</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">Self-Healing Runtime</p>
-        <h1>Operator Dashboard</h1>
+        <h1>Developer Console</h1>
       </div>
       <div class="toolbar">
         <label class="api-field">
@@ -26,7 +26,83 @@
       <section id="status-strip" class="status-strip" aria-live="polite"></section>
       <p id="error-banner" class="error-banner" hidden></p>
 
-      <div class="workspace">
+      <section class="console-grid" aria-label="Application and runtime consoles">
+        <article class="panel user-console">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow dark">User-Facing Console</p>
+              <h2 id="app-console-title">Application Preview</h2>
+            </div>
+            <div class="action-controls">
+              <button id="run-app-health" type="button">Run App Check</button>
+              <button id="reload-preview" type="button">Reload Preview</button>
+              <button id="open-user-app" type="button">Open App</button>
+            </div>
+          </div>
+          <p id="app-console-meta" class="muted"></p>
+          <div class="preview-shell">
+            <iframe id="user-app-frame" title="User-facing application preview"></iframe>
+          </div>
+          <div class="console-footer">
+            <div>
+              <h2>Registered Apps</h2>
+              <div id="app-list" class="app-list"></div>
+            </div>
+            <div>
+              <h2>Critical Probes</h2>
+              <div id="app-probe-list" class="probe-list"></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel system-console">
+          <p class="eyebrow dark">Developer-Facing Console</p>
+          <h2>Self-Healing System State</h2>
+          <div id="system-narrative" class="narrative"></div>
+          <h2 class="subsection-heading">Onboarding Health</h2>
+          <div id="onboarding-list" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="signal-grid" aria-label="Metrics, SLOs, and operator notes">
+        <article class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow dark">Reliability Signals</p>
+              <h2>Metrics & SLOs</h2>
+            </div>
+            <button id="send-sample-metric" type="button">Send Sample Breach</button>
+          </div>
+          <div id="slo-list" class="stack"></div>
+          <div id="slo-history-list" class="stack signal-list"></div>
+          <div id="metric-list" class="stack signal-list"></div>
+        </article>
+
+        <article class="panel">
+          <p class="eyebrow dark">Human Signal</p>
+          <h2>Operator Notes</h2>
+          <form id="note-form" class="note-form">
+            <label>
+              <span>Severity</span>
+              <select id="note-severity">
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+                <option value="low">Low</option>
+                <option value="info">Info</option>
+              </select>
+            </label>
+            <label>
+              <span>Observation</span>
+              <textarea id="note-text" rows="3" placeholder="Example: Users are reporting slow checkout after the last deploy."></textarea>
+            </label>
+            <button type="submit">Submit Note</button>
+          </form>
+          <div id="note-list" class="stack signal-list"></div>
+        </article>
+      </section>
+
+      <div class="workspace developer-dashboard">
         <aside class="panel left-rail">
           <section>
             <div class="section-title">

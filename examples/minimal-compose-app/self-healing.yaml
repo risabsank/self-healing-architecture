@@ -1,0 +1,97 @@
+app_id: my-compose-app
+display_name: My Compose App
+environment: local
+sandbox_id: local-docker
+dependencies: []
+
+services:
+  - name: web
+    service_type: web
+    base_url: http://host.docker.internal:8080
+    health_url: http://host.docker.internal:8080/health
+    public_url: http://localhost:8080
+    adapter_url: http://host.docker.internal:8011
+
+health_checks:
+  - name: health
+    service: web
+    method: GET
+    path: /health
+    healthy_status: healthy
+
+critical_probes:
+  - name: homepage
+    service: web
+    method: GET
+    path: /
+  - name: api-readiness
+    service: web
+    method: GET
+    path: /api/ready
+
+metric_sources:
+  - name: availability
+    unit: ratio
+  - name: latency_p95_ms
+    unit: ms
+  - name: error_rate
+    unit: ratio
+
+slo_targets:
+  - name: homepage-latency
+    metric: latency_p95_ms
+    target: 750
+    comparator: "<="
+    window: 5m
+    severity: high
+  - name: user-visible-error-rate
+    metric: error_rate
+    target: 0.02
+    comparator: "<="
+    window: 5m
+    severity: critical
+
+safe_actions:
+  - action_type: RESTART_SERVICE
+    service: web
+    description: Restart the web service through the sidecar adapter.
+    required_params: [service]
+    adapter_path: /adapter/actions/RESTART_SERVICE
+    max_autonomous_risk: 0.25
+    blast_radius: low
+    rollback_available: true
+    approval_required: false
+
+repair_policy:
+  approved_paths:
+    - app/
+    - tests/
+  path_owners:
+    app/: app-team
+    tests/: app-team
+  test_commands:
+    - [python, -m, unittest, discover, tests]
+  build_commands: []
+  rollback_strategy: Apply generated rollback operations.
+
+repo:
+  root: /workspace
+  kind: local
+
+verification:
+  commands:
+    - [python, -m, unittest, discover, tests]
+
+canary:
+  environment: local-canary
+  traffic_percentage: 10
+  probes:
+    - name: health
+      service: web
+      method: GET
+      path: /health
+      healthy_status: healthy
+    - name: homepage
+      service: web
+      method: GET
+      path: /

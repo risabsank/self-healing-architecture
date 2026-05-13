@@ -14,7 +14,8 @@ def list_incidents(conn: Connection = Depends(get_connection)):
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, sandbox_id, status, title, detected_at, resolved_at, root_cause, final_summary
+            SELECT id, sandbox_id, app_id, service_name, severity, trigger_source,
+                   status, title, detected_at, resolved_at, root_cause, final_summary
             FROM incidents
             ORDER BY detected_at DESC
             LIMIT 100
@@ -28,11 +29,20 @@ def create_incident(payload: IncidentCreate, conn: Connection = Depends(get_conn
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO incidents (sandbox_id, status, title)
-            VALUES (%s, %s, %s)
-            RETURNING id, sandbox_id, status, title, detected_at, resolved_at, root_cause, final_summary
+            INSERT INTO incidents (sandbox_id, app_id, service_name, severity, trigger_source, status, title)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, sandbox_id, app_id, service_name, severity, trigger_source,
+                      status, title, detected_at, resolved_at, root_cause, final_summary
             """,
-            (payload.sandbox_id, payload.status, payload.title),
+            (
+                payload.sandbox_id,
+                payload.app_id,
+                payload.service_name,
+                payload.severity,
+                payload.trigger_source,
+                payload.status,
+                payload.title,
+            ),
         )
         incident = cur.fetchone()
         cur.execute(
@@ -43,7 +53,14 @@ def create_incident(payload: IncidentCreate, conn: Connection = Depends(get_conn
             (
                 incident["id"],
                 payload.sandbox_id,
-                Jsonb({"title": payload.title, "status": payload.status}),
+                Jsonb({
+                    "title": payload.title,
+                    "status": payload.status,
+                    "app_id": payload.app_id,
+                    "service_name": payload.service_name,
+                    "severity": payload.severity,
+                    "trigger_source": payload.trigger_source,
+                }),
             ),
         )
     conn.commit()
@@ -55,7 +72,8 @@ def get_incident(incident_id: str, conn: Connection = Depends(get_connection)):
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, sandbox_id, status, title, detected_at, resolved_at, root_cause, final_summary
+            SELECT id, sandbox_id, app_id, service_name, severity, trigger_source,
+                   status, title, detected_at, resolved_at, root_cause, final_summary
             FROM incidents
             WHERE id = %s
             """,

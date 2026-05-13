@@ -4,7 +4,16 @@ from pydantic import BaseModel, Field
 
 
 class Evidence(BaseModel):
-    source: Literal["healthcheck", "runtime_event", "service_metadata", "scenario", "memory", "app_manifest"]
+    source: Literal[
+        "healthcheck",
+        "runtime_event",
+        "service_metadata",
+        "scenario",
+        "memory",
+        "app_manifest",
+        "metric_slo",
+        "operator_note",
+    ]
     kind: str
     summary: str
     content: dict[str, Any] = Field(default_factory=dict)

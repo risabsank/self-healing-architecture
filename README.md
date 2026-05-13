@@ -2,7 +2,7 @@
 
 ## Reasoning + Memory for Live Software Failures
 
-Self-Healing Runtime is a professional-grade autonomous incident response and software repair platform for live software systems. It monitors running applications inside isolated sandboxes, detects failures, gathers evidence, reasons about likely root causes, retrieves similar past incidents from memory, applies safe bounded mitigations, verifies recovery, and can generate validated code changes that make the system more resilient over time.
+Self-Healing Runtime is an open-source autonomous incident response and software repair platform for observable live software failures. It monitors registered Docker Compose applications inside isolated sandboxes, detects failures through declared health checks, probes, metrics, SLOs, notes, and runtime signals, reasons about likely root causes, retrieves similar past incidents from memory, applies safe bounded mitigations, verifies recovery, and can generate validated code changes that make the system more resilient over time.
 
 Self-Healing Runtime is not a generic chatbot and it is not a collection of static alerting playbooks. The system is designed around long-running agents that behave like careful production incident responders.
 
@@ -32,7 +32,11 @@ The system is designed to be easy to understand while still reflecting productio
 
 The core moment: the service breaks live, the runtime investigates like an incident responder, restores service with a constrained mitigation, proposes a durable fix, validates it through a deployment pipeline, canaries it safely, and leaves behind a complete audit trail.
 
-The runtime also supports Docker Compose applications beyond the bundled target. An application can register a `self-healing.yaml` manifest with service URLs, probes, safe actions, sidecar adapter settings, repair policy, and canary checks. See `docs/bring-your-own-website.md`.
+The runtime also supports Docker Compose applications beyond the bundled target. An application can register a `self-healing.yaml` manifest with service URLs, probes, metrics, SLO targets, safe actions, sidecar adapter settings, repair policy, and canary checks. See `docs/bring-your-own-website.md`.
+
+The runtime does not claim to catch every possible hidden bug. It responds to failures that are made observable through health checks, probes, metrics, logs, traces, exceptions, user reports, operator notes, or declared invariants.
+
+For a self-serve Docker Compose onboarding path, start with `docs/30-minute-compose-onboarding.md`. For the manifest and sidecar contract, see `docs/integration-contract.md` and `docs/adapter-authoring.md`.
 
 ## Design Principles
 
@@ -264,6 +268,16 @@ Example routes:
 
 ```text
 GET    /health
+GET    /apps
+POST   /apps/register
+GET    /apps/{app_id}
+POST   /apps/{app_id}/health-check
+POST   /apps/{app_id}/metrics
+GET    /apps/{app_id}/metrics
+GET    /apps/{app_id}/slo-status
+POST   /apps/{app_id}/notes
+GET    /apps/{app_id}/notes
+
 POST   /sandboxes
 GET    /sandboxes/{sandbox_id}
 GET    /sandboxes/runtimes
@@ -327,6 +341,17 @@ GET    /events/stream
 ```
 
 Production-oriented deployments can enable API-key authentication with `AUTH_ENABLED=true` and `API_KEYS` or `API_KEYS_FILE`. See `docs/production-hardening.md` for the worker, migration, tracing, secrets, CI, and runtime isolation model.
+
+## FAQ: Failure Coverage
+
+**Can the runtime catch every software error?**  
+No. It catches failures that are observable. A hidden bug with no health impact, probe failure, metric change, log/trace signal, exception, user report, or operator note cannot be reliably detected.
+
+**How do I increase coverage?**  
+Add user-visible probes, submit metrics, define SLO targets, emit structured logs/traces, and let operators submit notes when users report degraded behavior.
+
+**Can it mutate my application directly?**  
+Runtime mitigation only goes through the sidecar adapter actions declared in the manifest. Durable repairs only go through approved repository paths, diff preview, approval policy, CI verification, rollback, and canary gates.
 
 Claude-backed reasoning can be enabled with `LLM_REASONING_ENABLED=true` and `ANTHROPIC_API_KEY`. See `docs/llm-reasoning.md` for the typed LangGraph/Claude incident and repair planning flow.
 

@@ -39,6 +39,17 @@ CREATE TABLE IF NOT EXISTS applications (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS app_metric_observations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+  metric_name TEXT NOT NULL,
+  value DOUBLE PRECISION NOT NULL,
+  unit TEXT,
+  source TEXT NOT NULL,
+  labels JSONB NOT NULL DEFAULT '{}'::jsonb,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS sandbox_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sandbox_id TEXT REFERENCES sandboxes(id) ON DELETE CASCADE,
@@ -72,6 +83,10 @@ CREATE TABLE IF NOT EXISTS runtime_events (
 CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sandbox_id TEXT NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
+  app_id TEXT,
+  service_name TEXT,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  trigger_source TEXT NOT NULL DEFAULT 'unknown',
   status TEXT NOT NULL,
   title TEXT,
   detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -88,6 +103,35 @@ CREATE TABLE IF NOT EXISTS incident_events (
   type TEXT NOT NULL,
   actor TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS app_slo_evaluations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+  slo_name TEXT NOT NULL,
+  metric_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  target DOUBLE PRECISION NOT NULL,
+  observed_value DOUBLE PRECISION NOT NULL,
+  comparator TEXT NOT NULL,
+  slo_window TEXT NOT NULL,
+  observation_id UUID REFERENCES app_metric_observations(id) ON DELETE SET NULL,
+  incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app_operator_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id TEXT NOT NULL REFERENCES applications(app_id) ON DELETE CASCADE,
+  sandbox_id TEXT NOT NULL REFERENCES sandboxes(id) ON DELETE CASCADE,
+  service_name TEXT,
+  severity TEXT NOT NULL,
+  note TEXT NOT NULL,
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metric_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  incident_id UUID REFERENCES incidents(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS evidence_items (
@@ -221,6 +265,15 @@ CREATE INDEX IF NOT EXISTS idx_health_checks_sandbox_checked_at
 CREATE INDEX IF NOT EXISTS idx_applications_sandbox
   ON applications (sandbox_id, status);
 
+CREATE INDEX IF NOT EXISTS idx_app_metrics_app_observed
+  ON app_metric_observations (app_id, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_slo_app_evaluated
+  ON app_slo_evaluations (app_id, evaluated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_notes_app_created
+  ON app_operator_notes (app_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_sandbox_snapshots_sandbox_created
   ON sandbox_snapshots (sandbox_id, created_at DESC);
 
@@ -229,6 +282,12 @@ CREATE INDEX IF NOT EXISTS idx_runtime_events_sandbox_ts
 
 CREATE INDEX IF NOT EXISTS idx_incidents_sandbox_status
   ON incidents (sandbox_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_incidents_app_open
+  ON incidents (app_id, service_name, status, detected_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_incidents_trigger_source
+  ON incidents (trigger_source, detected_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_incidents_detected_at
   ON incidents (detected_at DESC);
@@ -304,6 +363,15 @@ VALUES (
       {"name": "metadata", "service": "target-api", "method": "GET", "path": "/metadata"},
       {"name": "items", "service": "target-api", "method": "GET", "path": "/items"},
       {"name": "checkout", "service": "target-api", "method": "GET", "path": "/checkout"}
+    ],
+    "metric_sources": [
+      {"name": "availability", "description": "Fraction of successful user-visible probes.", "unit": "ratio"},
+      {"name": "latency_p95_ms", "description": "95th percentile user-visible request latency.", "unit": "ms"},
+      {"name": "error_rate", "description": "Fraction of failed user-visible requests.", "unit": "ratio"}
+    ],
+    "slo_targets": [
+      {"name": "checkout-latency", "metric": "latency_p95_ms", "target": 500, "comparator": "<=", "window": "5m", "severity": "high", "description": "Checkout p95 latency should remain below 500ms."},
+      {"name": "user-visible-error-rate", "metric": "error_rate", "target": 0.02, "comparator": "<=", "window": "5m", "severity": "critical", "description": "User-visible errors should stay below 2%."}
     ],
     "safe_actions": [
       {"action_type": "SET_ENV_VAR", "service": "target-api", "description": "Restore a known-good runtime configuration value.", "required_params": ["service", "key", "value_from"], "parameter_allowlists": {"key": ["DATABASE_URL", "TARGET_REQUIRED_SECRET"]}, "adapter_path": "/adapter/actions/SET_ENV_VAR", "max_autonomous_risk": 0.35, "blast_radius": "low", "rollback_available": true, "approval_required": false, "clears_scenarios": ["bad_database_url", "missing_required_env"]},
