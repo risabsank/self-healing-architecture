@@ -10,4 +10,4 @@ curl -X POST http://localhost:8000/apps/register-yaml \
   --data-binary @self-healing.yaml
 ```
 
-The app must also provide a sidecar adapter that implements the bounded adapter API documented in `docs/integration-contract.md`.
+The app must also provide a sidecar adapter that implements the bounded adapter API documented in [../../docs/integration-contract.md](../../docs/integration-contract.md).

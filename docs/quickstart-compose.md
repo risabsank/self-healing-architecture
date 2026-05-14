@@ -1,8 +1,8 @@
-# 30-Minute Docker Compose Onboarding
+# Docker Compose Quickstart
 
-This guide walks through onboarding a simple Docker Compose app with docs only.
+This guide shows how to run Self-Healing Runtime and onboard the minimal external Compose app.
 
-## 1. Start Self-Healing Runtime
+## 1. Start The Runtime
 
 ```bash
 cp .env.example .env
@@ -10,13 +10,17 @@ docker compose -f infra/docker-compose.yml up -d --build
 curl -fsS http://localhost:8000/health
 ```
 
-## 2. Start The Minimal Example App
+The health response should report a healthy control API, database, and reference target service.
+
+## 2. Start The Minimal App
 
 ```bash
 docker compose -f examples/minimal-compose-app/docker-compose.yml up -d --build
 curl -fsS http://localhost:8080/health
 curl -fsS http://localhost:8011/adapter/capabilities
 ```
+
+The app listens on `http://localhost:8080`. Its sidecar adapter listens on `http://localhost:8011`.
 
 ## 3. Validate The Manifest
 
@@ -26,7 +30,7 @@ curl -fsS -X POST http://localhost:8000/apps/validate-yaml \
   --data-binary @examples/minimal-compose-app/self-healing.yaml
 ```
 
-All readiness checks should pass. Fix any check marked `ok: false` before registering the app.
+Fix any readiness check with `"ok": false` before registering the app.
 
 ## 4. Register The App
 
@@ -41,6 +45,7 @@ Confirm registration:
 ```bash
 curl -fsS http://localhost:8000/apps/my-compose-app
 curl -fsS http://localhost:8000/apps/my-compose-app/validation
+curl -fsS -X POST http://localhost:8000/apps/my-compose-app/health-check
 ```
 
 ## 5. Send Reliability Signals
@@ -69,22 +74,34 @@ curl -fsS -X POST http://localhost:8000/apps/my-compose-app/notes \
   -d '{"severity":"high","service_name":"web","note":"Users are reporting a slow homepage after deploy.","tags":["quickstart"]}'
 ```
 
-## 6. Inspect The Dashboard
+The SLO breach and high-severity note should create or correlate into an incident for `my-compose-app`.
+
+## 6. Open The Dashboard
 
 ```bash
 cd apps/dashboard
-npm install
 npm run dev
 ```
 
 Open `http://localhost:3000`, select `my-compose-app`, and verify:
 
 - the user-facing app preview loads,
-- onboarding health checks are green,
-- SLO status and metric history are visible,
-- operator notes link to incidents,
-- incidents show trigger source, severity, and typed evidence.
+- onboarding health checks are visible,
+- SLO status and metric history appear,
+- operator notes appear,
+- incidents show trigger source, severity, app, and service.
 
-## 7. Next Integration Steps
+## 7. Adapt This To Your App
 
-For your own app, replace the minimal manifest values with your service names, public URL, health checks, user-visible probes, SLOs, sidecar adapter URL, safe actions, approved repair paths, test commands, and canary probes.
+For your own app, copy `examples/minimal-compose-app/self-healing.yaml` and update:
+
+- app id and display name,
+- service URLs,
+- health checks and critical probes,
+- metric sources and SLO targets,
+- sidecar adapter URL,
+- safe actions,
+- approved repair paths and test commands,
+- canary probes.
+
+Then implement the sidecar adapter contract described in [adapter-authoring.md](adapter-authoring.md).
