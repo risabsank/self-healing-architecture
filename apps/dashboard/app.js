@@ -5,6 +5,7 @@ const state = {
   apiBase: localStorage.getItem("controlApiBaseUrl") || DEFAULT_API,
   selectedIncidentId: null,
   selectedAppId: localStorage.getItem("selectedAppId") || null,
+  tutorialIndex: -1,
   data: {}
 };
 
@@ -13,6 +14,7 @@ const dom = Object.fromEntries([
   "api-base",
   "save-api",
   "refresh",
+  "start-tutorial",
   "run-health",
   "run-app-health",
   "reset-scenarios",
@@ -27,6 +29,9 @@ const dom = Object.fromEntries([
   "note-severity",
   "note-text",
   "error-banner",
+  "help-popover",
+  "tutorial-scrim",
+  "tutorial-card",
   "status-strip",
   "app-console-title",
   "app-console-meta",
@@ -61,6 +66,7 @@ const dom = Object.fromEntries([
 const BUTTON_ACTIONS = {
   "save-api": () => saveApiBase(),
   refresh: () => refresh(),
+  "start-tutorial": () => startTutorial(),
   "run-health": () => mutate(`/sandboxes/${SANDBOX_ID}/health-check`),
   "run-app-health": () => selectedApp((app) => mutate(`/apps/${app.app_id}/health-check`)),
   "reload-preview": () => reloadPreview(),
@@ -88,18 +94,105 @@ const DATASET_ACTIONS = {
   rolloutQuarantine: (id) => mutate(`/canary-rollouts/${id}/quarantine`)
 };
 
+const TUTORIAL_STEPS = [
+  {
+    selector: "#status-strip",
+    title: "Start With The Status Strip",
+    body: "Confirm the Control API is healthy, the selected app is active, target health is healthy, and active incidents are visible."
+  },
+  {
+    selector: "[data-tour='user-console']",
+    title: "Watch The User Experience",
+    body: "This preview shows what the app user sees. During a recovery run, this is where you verify the app becomes reachable again."
+  },
+  {
+    selector: "[data-tour='system-console']",
+    title: "Read The System Summary",
+    body: "The developer console summarizes the runtime's current app, health, incident, mitigation, repair, and onboarding state."
+  },
+  {
+    selector: "[data-tour='slo-panel']",
+    title: "Track Reliability Signals",
+    body: "Metrics and SLO evaluations can create incidents even when basic health checks are still passing."
+  },
+  {
+    selector: "[data-tour='notes-panel']",
+    title: "Add Human Context",
+    body: "Operator notes let support reports and developer observations become typed incident evidence."
+  },
+  {
+    selector: "[data-tour='incidents']",
+    title: "Select An Incident",
+    body: "Incidents collect all signals for a failure. Select one here to inspect the timeline, evidence, actions, and repair lifecycle."
+  },
+  {
+    selector: "[data-tour='timeline']",
+    title: "Replay The Incident",
+    body: "The timeline is the audit trail for detection, diagnosis, mitigation, verification, repair, canary, and memory."
+  },
+  {
+    selector: "[data-tour='evidence']",
+    title: "Inspect Evidence",
+    body: "Evidence shows exactly what the agent used: health checks, runtime events, manifest data, SLO breaches, notes, and memory."
+  },
+  {
+    selector: "[data-tour='hypotheses']",
+    title: "Review Root-Cause Ranking",
+    body: "Hypotheses explain likely causes with confidence and concise rationale summaries."
+  },
+  {
+    selector: "[data-tour='actions']",
+    title: "Check Guardrails",
+    body: "Actions are bounded mitigations. Look for risk score, approval policy, autonomy decision, and execution result."
+  },
+  {
+    selector: "[data-tour='verification']",
+    title: "Confirm Recovery",
+    body: "Verification proves the action worked through health checks, probes, dependencies, and scenario-specific checks."
+  },
+  {
+    selector: "[data-tour='repairs']",
+    title: "Review Durable Repairs",
+    body: "After runtime recovery, repair plans can propose code or config changes with owners, diff preview, rollback, and approval controls."
+  },
+  {
+    selector: "[data-tour='ci']",
+    title: "Check CI Gates",
+    body: "CI checks must pass before a generated repair can be released through canary."
+  },
+  {
+    selector: "[data-tour='canary']",
+    title: "Watch Canary Release",
+    body: "Canary rollout validates a generated change with limited probes before promotion, rollback, or quarantine."
+  },
+  {
+    selector: "[data-tour='memory']",
+    title: "Use Incident Memory",
+    body: "Memory matches show similar past incidents and what worked before. This gets more useful after repeated runs."
+  }
+];
+
 dom.apiBase.value = state.apiBase;
+installInfoButtons();
 document.addEventListener("click", handleClick);
+window.addEventListener("resize", hideHelp);
 dom.noteForm.addEventListener("submit", submitNote);
 refresh();
 setInterval(refresh, 10000);
 
 async function handleClick(event) {
   const button = event.target.closest("button");
-  if (!button) return;
+  if (!button) {
+    if (!event.target.closest("#help-popover")) hideHelp();
+    return;
+  }
 
   const id = button.id;
   const data = button.dataset;
+  if (data.helpFor) return showHelp(button, document.querySelector(`[data-help-id="${data.helpFor}"]`));
+  if (data.tutorialAction === "next") return nextTutorialStep();
+  if (data.tutorialAction === "prev") return previousTutorialStep();
+  if (data.tutorialAction === "close") return closeTutorial();
   if (BUTTON_ACTIONS[id]) return BUTTON_ACTIONS[id]();
   if (data.app) return selectApp(data.app);
   if (data.incident) return selectAndRefresh(data.incident);
@@ -108,6 +201,109 @@ async function handleClick(event) {
   for (const [key, action] of Object.entries(DATASET_ACTIONS)) {
     if (data[key]) return action(data[key]);
   }
+
+  if (!event.target.closest("#help-popover")) hideHelp();
+}
+
+function installInfoButtons() {
+  document.querySelectorAll("[data-help]").forEach((section, index) => {
+    const helpId = `help-${index}`;
+    section.dataset.helpId = helpId;
+    section.classList.add("help-scope");
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button info-button";
+    button.dataset.helpFor = helpId;
+    button.setAttribute("aria-label", `About ${section.dataset.helpTitle || "this section"}`);
+    button.textContent = "i";
+
+    const title = section.querySelector(":scope > .section-title");
+    if (title) {
+      title.append(button);
+    } else {
+      button.classList.add("floating-info-button");
+      section.prepend(button);
+    }
+  });
+}
+
+function showHelp(button, section) {
+  if (!section) return;
+  const title = section.dataset.helpTitle || "About this section";
+  const body = section.dataset.help || "";
+  dom.helpPopover.innerHTML = `
+    <h3>${safe(title)}</h3>
+    <p>${safe(body)}</p>
+  `;
+  placeFloatingBox(dom.helpPopover, button.getBoundingClientRect());
+  dom.helpPopover.hidden = false;
+}
+
+function hideHelp() {
+  dom.helpPopover.hidden = true;
+}
+
+function startTutorial() {
+  hideHelp();
+  state.tutorialIndex = 0;
+  showTutorialStep();
+}
+
+function nextTutorialStep() {
+  if (state.tutorialIndex >= TUTORIAL_STEPS.length - 1) return closeTutorial();
+  state.tutorialIndex += 1;
+  showTutorialStep();
+}
+
+function previousTutorialStep() {
+  state.tutorialIndex = Math.max(0, state.tutorialIndex - 1);
+  showTutorialStep();
+}
+
+function closeTutorial() {
+  state.tutorialIndex = -1;
+  document.querySelectorAll(".tutorial-highlight").forEach((element) => element.classList.remove("tutorial-highlight"));
+  dom.tutorialScrim.hidden = true;
+  dom.tutorialCard.hidden = true;
+}
+
+function showTutorialStep() {
+  document.querySelectorAll(".tutorial-highlight").forEach((element) => element.classList.remove("tutorial-highlight"));
+  const step = TUTORIAL_STEPS[state.tutorialIndex];
+  const target = document.querySelector(step.selector);
+  if (!target) return nextTutorialStep();
+
+  target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  target.classList.add("tutorial-highlight");
+  dom.tutorialScrim.hidden = false;
+  dom.tutorialCard.innerHTML = `
+    <div class="tutorial-progress">Step ${state.tutorialIndex + 1} of ${TUTORIAL_STEPS.length}</div>
+    <h3>${safe(step.title)}</h3>
+    <p>${safe(step.body)}</p>
+    <div class="tutorial-actions">
+      <button type="button" data-tutorial-action="close">Close</button>
+      <button type="button" data-tutorial-action="prev" ${state.tutorialIndex === 0 ? "disabled" : ""}>Back</button>
+      <button class="primary" type="button" data-tutorial-action="next">${state.tutorialIndex === TUTORIAL_STEPS.length - 1 ? "Done" : "Next"}</button>
+    </div>
+  `;
+  const rect = target.getBoundingClientRect();
+  placeFloatingBox(dom.tutorialCard, rect);
+  dom.tutorialCard.hidden = false;
+}
+
+function placeFloatingBox(box, anchorRect) {
+  box.hidden = false;
+  const margin = 14;
+  const width = Math.min(360, window.innerWidth - margin * 2);
+  box.style.width = `${width}px`;
+
+  let left = Math.min(Math.max(anchorRect.left, margin), window.innerWidth - width - margin);
+  let top = anchorRect.bottom + margin;
+  if (top + 220 > window.innerHeight) top = Math.max(margin, anchorRect.top - 230);
+
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
 }
 
 function saveApiBase() {

@@ -19,15 +19,27 @@
         </label>
         <button id="save-api" type="button">Save</button>
         <button id="refresh" type="button">Refresh</button>
+        <button id="start-tutorial" type="button">Tutorial</button>
       </div>
     </header>
 
     <main>
-      <section id="status-strip" class="status-strip" aria-live="polite"></section>
+      <section
+        id="status-strip"
+        class="status-strip"
+        aria-live="polite"
+        data-help-title="Status Strip"
+        data-help="This is the fastest health summary. Watch Control API, selected application, target health, active incidents, and refresh time before and after an incident run."
+      ></section>
       <p id="error-banner" class="error-banner" hidden></p>
 
       <section class="console-grid" aria-label="Application and runtime consoles">
-        <article class="panel user-console">
+        <article
+          class="panel user-console"
+          data-tour="user-console"
+          data-help-title="User-Facing Console"
+          data-help="This iframe shows what an end user would see for the selected application. During a recovery run, use it to confirm the app is reachable again after mitigation."
+        >
           <div class="section-title">
             <div>
               <p class="eyebrow dark">User-Facing Console</p>
@@ -55,7 +67,12 @@
           </div>
         </article>
 
-        <article class="panel system-console">
+        <article
+          class="panel system-console"
+          data-tour="system-console"
+          data-help-title="Developer-Facing Console"
+          data-help="This summarizes the runtime's current understanding: selected app, health, incident state, chosen mitigation, repair status, and onboarding readiness."
+        >
           <p class="eyebrow dark">Developer-Facing Console</p>
           <h2>Self-Healing System State</h2>
           <div id="system-narrative" class="narrative"></div>
@@ -65,7 +82,12 @@
       </section>
 
       <section class="signal-grid" aria-label="Metrics, SLOs, and operator notes">
-        <article class="panel">
+        <article
+          class="panel"
+          data-tour="slo-panel"
+          data-help-title="Metrics And SLOs"
+          data-help="This area shows declared reliability objectives, recent SLO evaluations, and metric observations. Breached SLOs can create or update incidents."
+        >
           <div class="section-title">
             <div>
               <p class="eyebrow dark">Reliability Signals</p>
@@ -78,7 +100,12 @@
           <div id="metric-list" class="stack signal-list"></div>
         </article>
 
-        <article class="panel">
+        <article
+          class="panel"
+          data-tour="notes-panel"
+          data-help-title="Operator Notes"
+          data-help="Use notes to turn human observations into structured evidence. High-severity notes or degraded-behavior reports can create incidents."
+        >
           <p class="eyebrow dark">Human Signal</p>
           <h2>Operator Notes</h2>
           <form id="note-form" class="note-form">
@@ -104,7 +131,11 @@
 
       <div class="workspace developer-dashboard">
         <aside class="panel left-rail">
-          <section>
+          <section
+            data-tour="sandbox-health"
+            data-help-title="Sandbox Health"
+            data-help="This shows the monitored sandbox and registered services. Run Check asks the control plane to collect fresh health data."
+          >
             <div class="section-title">
               <h2>Sandbox Health</h2>
               <button id="run-health" type="button">Run Check</button>
@@ -112,7 +143,11 @@
             <div id="sandbox-health" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="failure-scenarios"
+            data-help-title="Failure Scenarios"
+            data-help="These switches inject realistic reference failures. Use them to demonstrate how the runtime detects, diagnoses, and recovers."
+          >
             <div class="section-title">
               <h2>Failure Scenarios</h2>
               <button id="reset-scenarios" type="button">Reset</button>
@@ -120,7 +155,11 @@
             <div id="scenario-list" class="scenario-list"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="incidents"
+            data-help-title="Incidents"
+            data-help="Incidents are created from observable signals such as health failures, probe failures, SLO breaches, and operator notes. Select one to inspect its lifecycle."
+          >
             <div class="section-title">
               <h2>Incidents</h2>
               <button id="analyze-incident" type="button">Analyze</button>
@@ -128,7 +167,11 @@
             <div id="incident-list" class="incident-list"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="evaluations"
+            data-help-title="Evaluation Runs"
+            data-help="Evaluation runs replay known failure scenarios and measure detection, diagnosis, recovery, and first-action success."
+          >
             <div class="section-title">
               <h2>Evaluation Runs</h2>
               <button id="run-evaluation" type="button">Run</button>
@@ -137,7 +180,12 @@
           </section>
         </aside>
 
-        <section class="panel center-stage">
+        <section
+          class="panel center-stage"
+          data-tour="timeline"
+          data-help-title="Incident Timeline"
+          data-help="The timeline is the audit trail. It records detection, evidence collection, reasoning, mitigation, verification, repair, canary, and memory events."
+        >
           <div id="incident-header" class="incident-header"></div>
           <div class="section-title timeline-title">
             <h2>Timeline</h2>
@@ -147,22 +195,38 @@
         </section>
 
         <aside class="panel right-rail">
-          <section>
+          <section
+            data-tour="evidence"
+            data-help-title="Evidence"
+            data-help="Evidence is typed input to the incident agent: health checks, runtime events, manifest data, SLO breaches, operator notes, and memory matches."
+          >
             <h2>Evidence</h2>
             <div id="evidence-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="hypotheses"
+            data-help-title="Hypotheses"
+            data-help="Hypotheses are ranked root-cause candidates with confidence scores and rationale summaries."
+          >
             <h2>Hypotheses</h2>
             <div id="hypothesis-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="actions"
+            data-help-title="Actions And Guardrails"
+            data-help="Actions are bounded mitigation candidates. This section shows risk, approval requirements, policy decisions, and execution controls."
+          >
             <h2>Actions & Guardrails</h2>
             <div id="action-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="repairs"
+            data-help-title="Durable Repairs"
+            data-help="Durable repairs are code or configuration changes proposed after runtime recovery. Review patch summaries, owners, rollback plans, and diff previews here."
+          >
             <div class="section-title">
               <h2>Durable Repairs</h2>
               <button id="plan-repair" type="button">Plan</button>
@@ -170,33 +234,57 @@
             <div id="repair-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="ci"
+            data-help-title="CI Checks"
+            data-help="CI checks gate generated repairs. Look for test, static, security, build, and replay checks before canary rollout."
+          >
             <h2>CI Checks</h2>
             <div id="ci-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="canary"
+            data-help-title="Canary Rollouts"
+            data-help="Canary rollouts send generated repairs through limited synthetic traffic or probes before promotion, rollback, or quarantine."
+          >
             <h2>Canary Rollouts</h2>
             <div id="canary-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="autonomy"
+            data-help-title="Autonomy Decisions"
+            data-help="Autonomy decisions explain why an action, repair, CI run, or rollout was autonomous, approval-gated, or blocked."
+          >
             <h2>Autonomy Decisions</h2>
             <div id="autonomy-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="verification"
+            data-help-title="Verification"
+            data-help="Verification proves recovery after a mitigation or repair. The runtime checks health, probes, dependencies, and scenario-specific outcomes."
+          >
             <h2>Verification</h2>
             <div id="verification-list" class="stack"></div>
           </section>
 
-          <section>
+          <section
+            data-tour="memory"
+            data-help-title="Memory Matches"
+            data-help="Memory matches show similar past incidents and why they mattered. Repeated runs should make this section increasingly useful."
+          >
             <h2>Memory Matches</h2>
             <div id="memory-list" class="stack"></div>
           </section>
         </aside>
       </div>
     </main>
+
+    <div id="help-popover" class="help-popover" role="dialog" aria-live="polite" hidden></div>
+    <div id="tutorial-scrim" class="tutorial-scrim" hidden></div>
+    <div id="tutorial-card" class="tutorial-card" role="dialog" aria-live="polite" hidden></div>
 
     <script type="module" src="./app.js"></script>
   </body>

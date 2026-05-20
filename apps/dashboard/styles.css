@@ -63,6 +63,19 @@ button:disabled {
   opacity: 0.55;
 }
 
+button.icon-button {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  height: 26px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0;
+  width: 26px;
+}
+
 .topbar {
   align-items: center;
   background: #17212f;
@@ -332,6 +345,27 @@ main {
   padding: 14px;
 }
 
+.help-scope {
+  position: relative;
+}
+
+.info-button {
+  background: #fff;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.info-button:hover {
+  color: var(--accent-strong);
+}
+
+.floating-info-button {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 2;
+}
+
 .panel section + section {
   border-top: 1px solid var(--line);
   margin-top: 16px;
@@ -557,6 +591,60 @@ main {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+}
+
+.help-popover,
+.tutorial-card {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 20px 70px rgba(27, 36, 48, 0.22);
+  color: var(--text);
+  max-width: min(360px, calc(100vw - 28px));
+  padding: 14px;
+  position: fixed;
+  z-index: 40;
+}
+
+.help-popover h3,
+.tutorial-card h3 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.help-popover p,
+.tutorial-card p {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.tutorial-scrim {
+  background: rgba(23, 33, 47, 0.4);
+  inset: 0;
+  position: fixed;
+  z-index: 30;
+}
+
+.tutorial-highlight {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+  position: relative;
+  z-index: 35;
+}
+
+.tutorial-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.tutorial-progress {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  text-transform: uppercase;
 }
 
 @media (max-width: 1180px) {
