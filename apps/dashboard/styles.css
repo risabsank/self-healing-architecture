@@ -188,7 +188,7 @@ main {
   background: #101820;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  height: clamp(340px, 46vh, 560px);
+  height: clamp(220px, 30vh, 360px);
   overflow: hidden;
 }
 
@@ -256,12 +256,6 @@ main {
   color: var(--muted);
   font-size: 12px;
   margin-bottom: 0;
-}
-
-.subsection-heading {
-  border-top: 1px solid var(--line);
-  margin-top: 12px;
-  padding-top: 12px;
 }
 
 .signal-list {
@@ -336,6 +330,12 @@ main {
   grid-template-columns: minmax(260px, 0.8fr) minmax(430px, 1.3fr) minmax(320px, 1fr);
 }
 
+.left-rail,
+.right-rail,
+.center-stage {
+  align-self: start;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -366,10 +366,59 @@ main {
   z-index: 2;
 }
 
-.panel section + section {
+.panel section + section,
+.panel section + details,
+.panel details + section,
+.panel details + details {
   border-top: 1px solid var(--line);
   margin-top: 16px;
   padding-top: 16px;
+}
+
+.compact-details,
+.dashboard-details {
+  margin-top: 12px;
+}
+
+.compact-details > summary,
+.dashboard-details > summary {
+  align-items: center;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.compact-details > summary::-webkit-details-marker,
+.dashboard-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.compact-details > summary::before,
+.dashboard-details > summary::before {
+  color: var(--muted);
+  content: "+";
+  font-size: 16px;
+  line-height: 1;
+}
+
+.compact-details[open] > summary::before,
+.dashboard-details[open] > summary::before {
+  content: "-";
+}
+
+.compact-details[open] > summary,
+.dashboard-details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.dashboard-details > button {
+  margin-bottom: 8px;
 }
 
 .section-title {
@@ -489,6 +538,9 @@ main {
 .timeline {
   display: grid;
   gap: 0;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .timeline-event {

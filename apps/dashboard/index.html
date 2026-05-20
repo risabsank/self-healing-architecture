@@ -55,16 +55,19 @@
           <div class="preview-shell">
             <iframe id="user-app-frame" title="User-facing application preview"></iframe>
           </div>
-          <div class="console-footer">
-            <div>
-              <h2>Registered Apps</h2>
-              <div id="app-list" class="app-list"></div>
+          <details class="compact-details">
+            <summary>Apps and probes</summary>
+            <div class="console-footer">
+              <div>
+                <h2>Registered Apps</h2>
+                <div id="app-list" class="app-list"></div>
+              </div>
+              <div>
+                <h2>Critical Probes</h2>
+                <div id="app-probe-list" class="probe-list"></div>
+              </div>
             </div>
-            <div>
-              <h2>Critical Probes</h2>
-              <div id="app-probe-list" class="probe-list"></div>
-            </div>
-          </div>
+          </details>
         </article>
 
         <article
@@ -76,8 +79,10 @@
           <p class="eyebrow dark">Developer-Facing Console</p>
           <h2>Self-Healing System State</h2>
           <div id="system-narrative" class="narrative"></div>
-          <h2 class="subsection-heading">Onboarding Health</h2>
-          <div id="onboarding-list" class="stack"></div>
+          <details class="compact-details">
+            <summary>Onboarding health</summary>
+            <div id="onboarding-list" class="stack"></div>
+          </details>
         </article>
       </section>
 
@@ -96,8 +101,11 @@
             <button id="send-sample-metric" type="button">Send Sample Breach</button>
           </div>
           <div id="slo-list" class="stack"></div>
-          <div id="slo-history-list" class="stack signal-list"></div>
-          <div id="metric-list" class="stack signal-list"></div>
+          <details class="compact-details">
+            <summary>Metric and SLO history</summary>
+            <div id="slo-history-list" class="stack signal-list"></div>
+            <div id="metric-list" class="stack signal-list"></div>
+          </details>
         </article>
 
         <article
@@ -143,17 +151,16 @@
             <div id="sandbox-health" class="stack"></div>
           </section>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="failure-scenarios"
             data-help-title="Failure Scenarios"
             data-help="These switches inject realistic reference failures. Use them to demonstrate how the runtime detects, diagnoses, and recovers."
           >
-            <div class="section-title">
-              <h2>Failure Scenarios</h2>
-              <button id="reset-scenarios" type="button">Reset</button>
-            </div>
+            <summary>Failure Scenarios</summary>
+            <button id="reset-scenarios" type="button">Reset</button>
             <div id="scenario-list" class="scenario-list"></div>
-          </section>
+          </details>
 
           <section
             data-tour="incidents"
@@ -167,17 +174,16 @@
             <div id="incident-list" class="incident-list"></div>
           </section>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="evaluations"
             data-help-title="Evaluation Runs"
             data-help="Evaluation runs replay known failure scenarios and measure detection, diagnosis, recovery, and first-action success."
           >
-            <div class="section-title">
-              <h2>Evaluation Runs</h2>
-              <button id="run-evaluation" type="button">Run</button>
-            </div>
+            <summary>Evaluation Runs</summary>
+            <button id="run-evaluation" type="button">Run</button>
             <div id="evaluation-list" class="stack"></div>
-          </section>
+          </details>
         </aside>
 
         <section
@@ -195,23 +201,25 @@
         </section>
 
         <aside class="panel right-rail">
-          <section
+          <details
+            class="dashboard-details"
             data-tour="evidence"
             data-help-title="Evidence"
             data-help="Evidence is typed input to the incident agent: health checks, runtime events, manifest data, SLO breaches, operator notes, and memory matches."
           >
-            <h2>Evidence</h2>
+            <summary>Evidence</summary>
             <div id="evidence-list" class="stack"></div>
-          </section>
+          </details>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="hypotheses"
             data-help-title="Hypotheses"
             data-help="Hypotheses are ranked root-cause candidates with confidence scores and rationale summaries."
           >
-            <h2>Hypotheses</h2>
+            <summary>Hypotheses</summary>
             <div id="hypothesis-list" class="stack"></div>
-          </section>
+          </details>
 
           <section
             data-tour="actions"
@@ -222,44 +230,46 @@
             <div id="action-list" class="stack"></div>
           </section>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="repairs"
             data-help-title="Durable Repairs"
             data-help="Durable repairs are code or configuration changes proposed after runtime recovery. Review patch summaries, owners, rollback plans, and diff previews here."
           >
-            <div class="section-title">
-              <h2>Durable Repairs</h2>
-              <button id="plan-repair" type="button">Plan</button>
-            </div>
+            <summary>Durable Repairs</summary>
+            <button id="plan-repair" type="button">Plan</button>
             <div id="repair-list" class="stack"></div>
-          </section>
+          </details>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="ci"
             data-help-title="CI Checks"
             data-help="CI checks gate generated repairs. Look for test, static, security, build, and replay checks before canary rollout."
           >
-            <h2>CI Checks</h2>
+            <summary>CI Checks</summary>
             <div id="ci-list" class="stack"></div>
-          </section>
+          </details>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="canary"
             data-help-title="Canary Rollouts"
             data-help="Canary rollouts send generated repairs through limited synthetic traffic or probes before promotion, rollback, or quarantine."
           >
-            <h2>Canary Rollouts</h2>
+            <summary>Canary Rollouts</summary>
             <div id="canary-list" class="stack"></div>
-          </section>
+          </details>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="autonomy"
             data-help-title="Autonomy Decisions"
             data-help="Autonomy decisions explain why an action, repair, CI run, or rollout was autonomous, approval-gated, or blocked."
           >
-            <h2>Autonomy Decisions</h2>
+            <summary>Autonomy Decisions</summary>
             <div id="autonomy-list" class="stack"></div>
-          </section>
+          </details>
 
           <section
             data-tour="verification"
@@ -270,14 +280,15 @@
             <div id="verification-list" class="stack"></div>
           </section>
 
-          <section
+          <details
+            class="dashboard-details"
             data-tour="memory"
             data-help-title="Memory Matches"
             data-help="Memory matches show similar past incidents and why they mattered. Repeated runs should make this section increasingly useful."
           >
-            <h2>Memory Matches</h2>
+            <summary>Memory Matches</summary>
             <div id="memory-list" class="stack"></div>
-          </section>
+          </details>
         </aside>
       </div>
     </main>

@@ -219,8 +219,11 @@ function installInfoButtons() {
     button.textContent = "i";
 
     const title = section.querySelector(":scope > .section-title");
+    const summary = section.querySelector(":scope > summary");
     if (title) {
       title.append(button);
+    } else if (summary) {
+      summary.append(button);
     } else {
       button.classList.add("floating-info-button");
       section.prepend(button);
