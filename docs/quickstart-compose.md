@@ -105,3 +105,11 @@ For your own app, copy `examples/minimal-compose-app/self-healing.yaml` and upda
 - canary probes.
 
 Then implement the sidecar adapter contract described in [adapter-authoring.md](adapter-authoring.md).
+
+## Unregister The Minimal App
+
+When you stop the minimal app, unregister it so its `web` service is removed from health monitoring:
+
+```bash
+curl -fsS -X DELETE http://localhost:8000/apps/my-compose-app
+```

@@ -3,7 +3,14 @@ import unittest
 from app.app_signals import compare, note_should_trigger_incident
 from app.agents.graph import generate_fallback_hypotheses, propose_mitigations
 from app.agents.state import Evidence
-from app.apps import DEFAULT_APP_MANIFEST, manifest_from_app, safe_action, service_manifest, validate_manifest_readiness
+from app.apps import (
+    DEFAULT_APP_MANIFEST,
+    deactivate_application,
+    manifest_from_app,
+    safe_action,
+    service_manifest,
+    validate_manifest_readiness,
+)
 from app.models.schemas import ApplicationManifest
 from app.models.schemas import OperatorNoteCreate
 from app.sandbox.allowed_actions import ActionPolicyError, validate_action_policy
@@ -121,6 +128,31 @@ class ApplicationManifestTests(unittest.TestCase):
 
         self.assertEqual(mitigations[0].action_type, "RESTART_SERVICE")
         self.assertEqual(mitigations[0].params["service"], "web")
+
+    def test_deactivate_application_returns_none_when_missing(self):
+        class FakeConnection:
+            def cursor(self):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def execute(self, *_):
+                pass
+
+            def fetchone(self):
+                return None
+
+            def rollback(self):
+                self.rolled_back = True
+
+        conn = FakeConnection()
+
+        self.assertIsNone(deactivate_application(conn, "missing-app"))
+        self.assertTrue(conn.rolled_back)
 
 
 if __name__ == "__main__":

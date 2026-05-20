@@ -184,10 +184,13 @@ POST /apps/validate
 POST /apps/register
 POST /apps/validate-yaml
 POST /apps/register-yaml
+DELETE /apps/{app_id}
 GET  /apps/{app_id}/validation
 ```
 
 Use `validate-yaml` before registration so missing services, probes, SLOs, safe actions, or repair policy fields are reported clearly.
+
+Use `DELETE /apps/{app_id}` when an onboarded app should no longer participate in health monitoring. The app is marked inactive and its registered sandbox services are removed from the monitor set.
 
 ## Sidecar Adapter
 

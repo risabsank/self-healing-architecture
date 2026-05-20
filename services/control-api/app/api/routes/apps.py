@@ -4,7 +4,14 @@ from pydantic import ValidationError
 from psycopg import Connection
 
 from app.app_signals import latest_metrics, latest_notes, record_metric, record_note, slo_status
-from app.apps import get_application, list_applications, manifest_from_app, register_application, validate_manifest_readiness
+from app.apps import (
+    deactivate_application,
+    get_application,
+    list_applications,
+    manifest_from_app,
+    register_application,
+    validate_manifest_readiness,
+)
 from app.core.db import get_connection
 from app.models.schemas import ApplicationManifest, MetricObservationCreate, OperatorNoteCreate
 from app.monitoring import check_service_health
@@ -43,6 +50,14 @@ def read_app(app_id: str, conn: Connection = Depends(get_connection)):
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     return app
+
+
+@router.delete("/{app_id}")
+def unregister_app(app_id: str, conn: Connection = Depends(get_connection)):
+    app = deactivate_application(conn, app_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return {"app": app, "removed_from_monitoring": True}
 
 
 @router.get("/{app_id}/validation")

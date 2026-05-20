@@ -122,6 +122,7 @@ GET  /health
 GET  /apps
 POST /apps/validate-yaml
 POST /apps/register-yaml
+DELETE /apps/{app_id}
 POST /apps/{app_id}/health-check
 POST /apps/{app_id}/metrics
 GET  /apps/{app_id}/slo-status

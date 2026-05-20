@@ -217,6 +217,14 @@ def register_application(conn: Connection, manifest: ApplicationManifest) -> dic
     with conn.cursor() as cur:
         cur.execute(
             """
+            DELETE FROM sandbox_services
+            WHERE metadata->>'app_id' = %s
+              AND NOT service_name = ANY(%s)
+            """,
+            (manifest.app_id, [service.name for service in manifest.services]),
+        )
+        cur.execute(
+            """
             INSERT INTO applications (app_id, sandbox_id, display_name, environment, manifest, status)
             VALUES (%s, %s, %s, %s, %s, 'active')
             ON CONFLICT (app_id) DO UPDATE
@@ -263,6 +271,26 @@ def register_application(conn: Connection, manifest: ApplicationManifest) -> dic
                     Jsonb(metadata),
                 ),
             )
+    conn.commit()
+    return serialize_app(app)
+
+
+def deactivate_application(conn: Connection, app_id: str) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE applications
+            SET status = 'inactive', updated_at = now()
+            WHERE app_id = %s
+            RETURNING *
+            """,
+            (app_id,),
+        )
+        app = cur.fetchone()
+        if not app:
+            conn.rollback()
+            return None
+        cur.execute("DELETE FROM sandbox_services WHERE metadata->>'app_id' = %s", (app_id,))
     conn.commit()
     return serialize_app(app)
 

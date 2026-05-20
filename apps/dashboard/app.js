@@ -282,8 +282,9 @@ function chooseIncident() {
 
 function chooseApp() {
   const apps = state.data.apps || [];
-  if (apps.some((app) => app.app_id === state.selectedAppId)) return;
-  state.selectedAppId = (apps[0] || {}).app_id || null;
+  const selected = apps.find((app) => app.app_id === state.selectedAppId);
+  if (selected?.status === "active") return;
+  state.selectedAppId = (apps.find((app) => app.status === "active") || selected || apps[0] || {}).app_id || null;
   if (state.selectedAppId) localStorage.setItem("selectedAppId", state.selectedAppId);
 }
 
@@ -329,11 +330,11 @@ function renderStatus() {
 function renderUserConsole() {
   const app = currentApp();
   const service = primaryService(app);
-  const previewUrl = service?.public_url || service?.base_url || "";
+  const previewUrl = app?.status === "active" ? service?.public_url || service?.base_url || "" : "";
 
   dom.appConsoleTitle.textContent = app?.display_name || "Application Preview";
   dom.appConsoleMeta.textContent = app
-    ? `${app.app_id} · ${app.environment} · ${previewUrl || "no public URL configured"}`
+    ? `${app.app_id} · ${app.environment} · ${app.status}${previewUrl ? ` · ${previewUrl}` : " · no active preview configured"}`
     : "Register an application manifest to show the user-facing site here.";
 
   if (previewUrl && dom.userAppFrame.dataset.src !== previewUrl) {
@@ -347,7 +348,7 @@ function renderUserConsole() {
 
   renderCollection("appList", state.data.apps || [], renderAppButton, "No applications registered");
   renderCollection("appProbeList", appProbes(app), renderProbe, "No critical probes declared");
-  dom.runAppHealth.disabled = !app;
+  dom.runAppHealth.disabled = !app || app.status !== "active";
   dom.reloadPreview.disabled = !previewUrl;
   dom.openUserApp.disabled = !previewUrl;
 }
