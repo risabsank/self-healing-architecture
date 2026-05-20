@@ -13,7 +13,14 @@ from app.apps import (
     validate_manifest_readiness,
 )
 from app.core.db import get_connection
-from app.models.schemas import ApplicationManifest, MetricObservationCreate, OperatorNoteCreate
+from app.customizations import (
+    approve_customization_proposal,
+    create_customization_proposal,
+    get_customization_proposal,
+    list_customization_proposals,
+    reject_customization_proposal,
+)
+from app.models.schemas import ApplicationManifest, CustomizationPlanCreate, MetricObservationCreate, OperatorNoteCreate
 from app.monitoring import check_service_health
 
 router = APIRouter(prefix="/apps", tags=["applications"])
@@ -64,6 +71,48 @@ def unregister_app(app_id: str, conn: Connection = Depends(get_connection)):
 def read_app_validation(app_id: str, conn: Connection = Depends(get_connection)):
     app = require_app(conn, app_id)
     return validate_manifest_readiness(manifest_from_app(app))
+
+
+@router.post("/{app_id}/customizations/plan", status_code=201)
+def plan_customization(app_id: str, payload: CustomizationPlanCreate, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    return create_customization_proposal(conn, app, payload)
+
+
+@router.get("/{app_id}/customizations")
+def read_customizations(app_id: str, conn: Connection = Depends(get_connection)):
+    require_app(conn, app_id)
+    return {"proposals": list_customization_proposals(conn, app_id)}
+
+
+@router.get("/{app_id}/customizations/{proposal_id}")
+def read_customization(app_id: str, proposal_id: str, conn: Connection = Depends(get_connection)):
+    require_app(conn, app_id)
+    proposal = get_customization_proposal(conn, app_id, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Customization proposal not found")
+    return proposal
+
+
+@router.post("/{app_id}/customizations/{proposal_id}/approve")
+def approve_customization(app_id: str, proposal_id: str, conn: Connection = Depends(get_connection)):
+    app = require_app(conn, app_id)
+    try:
+        proposal = approve_customization_proposal(conn, app, proposal_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Customization proposal not found")
+    return proposal
+
+
+@router.post("/{app_id}/customizations/{proposal_id}/reject")
+def reject_customization(app_id: str, proposal_id: str, conn: Connection = Depends(get_connection)):
+    require_app(conn, app_id)
+    proposal = reject_customization_proposal(conn, app_id, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Customization proposal not found")
+    return proposal
 
 
 @router.post("/{app_id}/metrics", status_code=201)

@@ -28,6 +28,8 @@ const dom = Object.fromEntries([
   "note-form",
   "note-severity",
   "note-text",
+  "customization-form",
+  "customization-prompt",
   "error-banner",
   "help-popover",
   "tutorial-scrim",
@@ -40,9 +42,13 @@ const dom = Object.fromEntries([
   "app-probe-list",
   "system-narrative",
   "onboarding-list",
+  "customization-list",
   "slo-list",
   "slo-history-list",
   "metric-list",
+  "signal-group-list",
+  "dashboard-hint-list",
+  "note-template-list",
   "note-list",
   "sandbox-health",
   "scenario-list",
@@ -91,7 +97,10 @@ const DATASET_ACTIONS = {
   repairRollback: (id) => mutate(`/repairs/${id}/rollback`),
   rolloutPromote: (id) => mutate(`/canary-rollouts/${id}/promote`),
   rolloutRollback: (id) => mutate(`/canary-rollouts/${id}/rollback`),
-  rolloutQuarantine: (id) => mutate(`/canary-rollouts/${id}/quarantine`)
+  rolloutQuarantine: (id) => mutate(`/canary-rollouts/${id}/quarantine`),
+  customizationApprove: (id) => selectedApp((app) => mutate(`/apps/${app.app_id}/customizations/${id}/approve`)),
+  customizationReject: (id) => selectedApp((app) => mutate(`/apps/${app.app_id}/customizations/${id}/reject`)),
+  noteTemplate: (id) => applyNoteTemplate(id)
 };
 
 const TUTORIAL_STEPS = [
@@ -114,6 +123,11 @@ const TUTORIAL_STEPS = [
     selector: "[data-tour='slo-panel']",
     title: "Track Reliability Signals",
     body: "Metrics and SLO evaluations can create incidents even when basic health checks are still passing."
+  },
+  {
+    selector: "[data-tour='customize-runtime']",
+    title: "Customize Runtime Coverage",
+    body: "Describe app-specific reliability behavior here. The runtime creates a preview and waits for approval before changing the manifest."
   },
   {
     selector: "[data-tour='notes-panel']",
@@ -177,6 +191,7 @@ installInfoButtons();
 document.addEventListener("click", handleClick);
 window.addEventListener("resize", hideHelp);
 dom.noteForm.addEventListener("submit", submitNote);
+dom.customizationForm.addEventListener("submit", submitCustomization);
 refresh();
 setInterval(refresh, 10000);
 
@@ -363,6 +378,24 @@ async function submitNote(event) {
   dom.noteText.value = "";
 }
 
+async function submitCustomization(event) {
+  event.preventDefault();
+  const app = currentApp();
+  const prompt = dom.customizationPrompt.value.trim();
+  if (!app || !prompt) return;
+
+  await mutate(`/apps/${app.app_id}/customizations/plan`, { prompt });
+  dom.customizationPrompt.value = "";
+}
+
+function applyNoteTemplate(templateName) {
+  const template = (currentApp()?.manifest?.operator_note_templates || []).find((item) => item.name === templateName);
+  if (!template) return;
+  dom.noteSeverity.value = template.severity || "medium";
+  dom.noteText.value = template.note || "";
+  dom.noteText.focus();
+}
+
 async function refresh() {
   setBusy(true);
   hideError();
@@ -403,18 +436,20 @@ async function loadOverview() {
 
   chooseApp();
   if (state.selectedAppId) {
-    const [metrics, slo, notes, validation] = await Promise.all([
+    const [metrics, slo, notes, validation, customizations] = await Promise.all([
       api(`/apps/${state.selectedAppId}/metrics`).catch(() => ({ observations: [], slo_evaluations: [] })),
       api(`/apps/${state.selectedAppId}/slo-status`).catch(() => ({ slo_targets: [] })),
       api(`/apps/${state.selectedAppId}/notes`).catch(() => ({ notes: [] })),
-      api(`/apps/${state.selectedAppId}/validation`).catch(() => ({ checks: [], status: "unknown" }))
+      api(`/apps/${state.selectedAppId}/validation`).catch(() => ({ checks: [], status: "unknown" })),
+      api(`/apps/${state.selectedAppId}/customizations`).catch(() => ({ proposals: [] }))
     ]);
     Object.assign(state.data, {
       metrics: metrics.observations || [],
       sloEvaluations: metrics.slo_evaluations || [],
       sloTargets: slo.slo_targets || [],
       notes: notes.notes || [],
-      appValidation: validation
+      appValidation: validation,
+      customizations: customizations.proposals || []
     });
   }
 }
@@ -492,6 +527,7 @@ function render() {
   renderUserConsole();
   renderSystemNarrative();
   renderOnboardingHealth();
+  renderCustomizationPanel();
   renderReliabilitySignals();
   renderSandbox();
   renderScenarios();
@@ -556,8 +592,16 @@ function renderReliabilitySignals() {
   renderCollection("sloList", state.data.sloTargets || [], renderSloTarget, "No SLO targets declared");
   renderCollection("sloHistoryList", (state.data.sloEvaluations || []).slice(0, 5), renderSloEvaluation, "No SLO evaluations yet");
   renderCollection("metricList", (state.data.metrics || []).slice(0, 5), renderMetric, "No metric observations yet");
+  renderCollection("signalGroupList", currentApp()?.manifest?.signal_groups || [], renderSignalGroup, "No custom signal groups");
+  renderCollection("dashboardHintList", currentApp()?.manifest?.dashboard_hints || [], renderDashboardHint, "No custom dashboard hints");
+  renderCollection("noteTemplateList", currentApp()?.manifest?.operator_note_templates || [], renderNoteTemplate, "No note templates configured");
   renderCollection("noteList", state.data.notes || [], renderNote, "No operator notes yet");
   dom.sendSampleMetric.disabled = !currentApp();
+}
+
+function renderCustomizationPanel() {
+  renderCollection("customizationList", state.data.customizations || [], renderCustomizationProposal, "No customization proposals yet");
+  dom.customizationForm.querySelector("button").disabled = !currentApp();
 }
 
 function renderOnboardingHealth() {
@@ -567,6 +611,81 @@ function renderOnboardingHealth() {
     <div class="row"><strong>${safe(labelize(check.name))}</strong>${pill(check.ok ? "ok" : "missing")}</div>
     <p class="muted">${safe(check.message)}</p>
   `), "No manifest validation checks");
+}
+
+function renderCustomizationProposal(proposal) {
+  const patch = proposal.proposed_patch || {};
+  const validation = proposal.validation_result || {};
+  const controls = proposal.status === "planned"
+    ? `${actionButton("Approve", "customization-approve", proposal.id)}${actionButton("Reject", "customization-reject", proposal.id, "danger")}`
+    : "";
+
+  return card(`
+    <div class="row"><strong>${safe(patch.summary || "Customization proposal")}</strong>${pill(proposal.status)}</div>
+    <p class="muted">${safe(proposal.planner)} planner · ${safe(validation.summary || "validation pending")} · ${date(proposal.created_at)}</p>
+    ${proposal.error ? `<p class="muted">Fallback reason: ${safe(proposal.error)}</p>` : ""}
+    <div class="mini-grid">
+      <span>Probes <strong>${safe((patch.critical_probes || []).length)}</strong></span>
+      <span>SLOs <strong>${safe((patch.slo_targets || []).length)}</strong></span>
+      <span>Hints <strong>${safe((patch.dashboard_hints || []).length)}</strong></span>
+    </div>
+    ${renderCustomizationPreview(patch, validation)}
+    <div class="action-controls">${controls}</div>
+  `);
+}
+
+function renderCustomizationPreview(patch, validation) {
+  const preview = {
+    critical_probes: patch.critical_probes || [],
+    metric_sources: patch.metric_sources || [],
+    slo_targets: patch.slo_targets || [],
+    verification_probes: patch.verification_probes || [],
+    canary_probes: patch.canary_probes || [],
+    signal_groups: patch.signal_groups || [],
+    operator_note_templates: patch.operator_note_templates || [],
+    dashboard_hints: patch.dashboard_hints || []
+  };
+  return `
+    <details class="diff-preview">
+      <summary>Preview manifest additions</summary>
+      ${json(preview)}
+      ${renderValidationFailures(validation)}
+    </details>
+  `;
+}
+
+function renderValidationFailures(validation) {
+  const failed = (validation.checks || []).filter((check) => !check.ok);
+  if (!failed.length) return "";
+  return `<div class="checks">${failed.map((check) => `
+    <div class="check"><strong>${safe(labelize(check.name))}</strong>${pill("failed")}</div>
+    <p class="muted">${safe(check.message)}</p>
+  `).join("")}</div>`;
+}
+
+function renderSignalGroup(group) {
+  return card(`
+    <div class="row"><strong>${safe(group.label || group.name)}</strong><span class="muted">priority ${safe(group.priority ?? 50)}</span></div>
+    ${group.description ? `<p>${safe(group.description)}</p>` : ""}
+    <p class="muted">${safe((group.signals || []).join(" · ") || "No signals listed")}</p>
+  `);
+}
+
+function renderDashboardHint(hint) {
+  return card(`
+    <div class="row"><strong>${safe(hint.title || hint.name)}</strong><span class="muted">${safe(hint.group || "general")}</span></div>
+    <p>${safe(hint.description || "")}</p>
+    ${hint.signal_ref ? `<p class="muted">Signal: ${safe(hint.signal_ref)}</p>` : ""}
+  `);
+}
+
+function renderNoteTemplate(template) {
+  return card(`
+    <div class="row"><strong>${safe(template.label || template.name)}</strong>${pill(template.severity)}</div>
+    <p>${safe(template.note)}</p>
+    <p class="muted">${safe((template.tags || []).join(" · ") || "custom note template")}</p>
+    <div class="action-controls">${actionButton("Use Template", "note-template", template.name)}</div>
+  `);
 }
 
 function renderSloTarget(slo) {

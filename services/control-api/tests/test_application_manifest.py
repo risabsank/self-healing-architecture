@@ -11,7 +11,11 @@ from app.apps import (
     service_manifest,
     validate_manifest_readiness,
 )
+from app.customizations import deterministic_patch, merge_customization_patch, validate_customization_patch
 from app.models.schemas import ApplicationManifest
+from app.models.schemas import DashboardHintManifest
+from app.models.schemas import ManifestCustomizationPatch
+from app.models.schemas import SloTargetManifest
 from app.models.schemas import OperatorNoteCreate
 from app.sandbox.allowed_actions import ActionPolicyError, validate_action_policy
 
@@ -60,6 +64,48 @@ class ApplicationManifestTests(unittest.TestCase):
     def test_manifest_declares_slos_and_metric_sources(self):
         self.assertEqual(self.manifest.metric_sources[0].name, "availability")
         self.assertEqual(self.manifest.slo_targets[0].metric, "latency_p95_ms")
+
+    def test_customization_patch_adds_manifest_only_runtime_support(self):
+        patch = deterministic_patch(self.manifest, "Monitor checkout latency and create an incident if p95 exceeds 900ms.")
+
+        validation = validate_customization_patch(self.manifest, patch)
+        updated = merge_customization_patch(self.manifest, patch)
+
+        self.assertEqual(validation["status"], "valid")
+        self.assertTrue(any(metric.name == "checkout_latency_p95_ms" for metric in updated.metric_sources))
+        self.assertTrue(any(slo.name == "checkout-slo" for slo in updated.slo_targets))
+        self.assertTrue(any(template.name == "checkout-degradation-note" for template in updated.operator_note_templates))
+        self.assertTrue(any(hint.name == "checkout-hint" for hint in updated.dashboard_hints))
+        self.assertTrue(any(probe["name"] == "checkout-probe" for probe in updated.canary["probes"]))
+
+    def test_customization_patch_rejects_unknown_metric_reference(self):
+        patch = ManifestCustomizationPatch(
+            summary="invalid slo",
+            slo_targets=[SloTargetManifest(name="bad-slo", metric="unknown_metric", target=1)],
+        )
+
+        result = validate_customization_patch(self.manifest, patch)
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertTrue(any(check["name"] == "slo:bad-slo:metric" and not check["ok"] for check in result["checks"]))
+
+    def test_customization_patch_rejects_unknown_dashboard_signal(self):
+        patch = ManifestCustomizationPatch(
+            summary="invalid dashboard hint",
+            dashboard_hints=[
+                DashboardHintManifest(
+                    name="bad-hint",
+                    title="Bad hint",
+                    description="References a missing signal.",
+                    signal_ref="missing-signal",
+                )
+            ],
+        )
+
+        result = validate_customization_patch(self.manifest, patch)
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertTrue(any(check["name"] == "dashboard_hint:bad-hint:signal" and not check["ok"] for check in result["checks"]))
 
     def test_manifest_readiness_validation_reports_actionable_checks(self):
         result = validate_manifest_readiness(self.manifest)

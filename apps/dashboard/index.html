@@ -83,6 +83,22 @@
             <summary>Onboarding health</summary>
             <div id="onboarding-list" class="stack"></div>
           </details>
+          <details
+            class="compact-details"
+            data-tour="customize-runtime"
+            data-help-title="Customize Runtime"
+            data-help="Describe application-specific reliability behavior. The runtime previews manifest-only probes, metrics, SLOs, note templates, and dashboard hints before anything is approved."
+          >
+            <summary>Customize runtime</summary>
+            <form id="customization-form" class="note-form">
+              <label>
+                <span>Reliability behavior</span>
+                <textarea id="customization-prompt" rows="3" placeholder="Example: Monitor checkout latency and create an incident if p95 exceeds 900ms."></textarea>
+              </label>
+              <button type="submit">Generate Preview</button>
+            </form>
+            <div id="customization-list" class="stack signal-list"></div>
+          </details>
         </article>
       </section>
 
@@ -105,6 +121,11 @@
             <summary>Metric and SLO history</summary>
             <div id="slo-history-list" class="stack signal-list"></div>
             <div id="metric-list" class="stack signal-list"></div>
+          </details>
+          <details class="compact-details">
+            <summary>Custom groups and hints</summary>
+            <div id="signal-group-list" class="stack signal-list"></div>
+            <div id="dashboard-hint-list" class="stack signal-list"></div>
           </details>
         </article>
 
@@ -133,6 +154,7 @@
             </label>
             <button type="submit">Submit Note</button>
           </form>
+          <div id="note-template-list" class="stack signal-list"></div>
           <div id="note-list" class="stack signal-list"></div>
         </article>
       </section>

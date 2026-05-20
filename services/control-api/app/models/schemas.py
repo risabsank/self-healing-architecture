@@ -89,6 +89,33 @@ class SloTargetManifest(BaseModel):
     description: str | None = None
 
 
+class SignalGroupManifest(BaseModel):
+    name: str
+    label: str
+    description: str | None = None
+    signals: list[str] = Field(default_factory=list)
+    priority: int = 50
+
+
+class OperatorNoteTemplateManifest(BaseModel):
+    name: str
+    label: str
+    note: str
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    service_name: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    metric_refs: list[str] = Field(default_factory=list)
+
+
+class DashboardHintManifest(BaseModel):
+    name: str
+    title: str
+    description: str
+    signal_ref: str | None = None
+    group: str | None = None
+    priority: int = 50
+
+
 class ApplicationManifest(BaseModel):
     app_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
     display_name: str
@@ -105,6 +132,25 @@ class ApplicationManifest(BaseModel):
     canary: dict[str, Any] = Field(default_factory=dict)
     metric_sources: list[MetricSourceManifest] = Field(default_factory=list)
     slo_targets: list[SloTargetManifest] = Field(default_factory=list)
+    signal_groups: list[SignalGroupManifest] = Field(default_factory=list)
+    operator_note_templates: list[OperatorNoteTemplateManifest] = Field(default_factory=list)
+    dashboard_hints: list[DashboardHintManifest] = Field(default_factory=list)
+
+
+class ManifestCustomizationPatch(BaseModel):
+    summary: str
+    critical_probes: list[ProbeManifest] = Field(default_factory=list)
+    metric_sources: list[MetricSourceManifest] = Field(default_factory=list)
+    slo_targets: list[SloTargetManifest] = Field(default_factory=list)
+    verification_probes: list[ProbeManifest] = Field(default_factory=list)
+    canary_probes: list[ProbeManifest] = Field(default_factory=list)
+    signal_groups: list[SignalGroupManifest] = Field(default_factory=list)
+    operator_note_templates: list[OperatorNoteTemplateManifest] = Field(default_factory=list)
+    dashboard_hints: list[DashboardHintManifest] = Field(default_factory=list)
+
+
+class CustomizationPlanCreate(BaseModel):
+    prompt: str = Field(min_length=8)
 
 
 class MetricObservationCreate(BaseModel):

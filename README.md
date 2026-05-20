@@ -11,6 +11,7 @@ The runtime is designed for **observable failure response**. It can react to hea
 - Creates and correlates incidents by app, service, severity, and trigger source.
 - Uses typed incident evidence, hypotheses, mitigation candidates, and verification results.
 - Supports Claude-backed reasoning with deterministic fallback for local/CI runs.
+- Lets developers generate manifest-only runtime customizations from natural-language requests, with preview and approval.
 - Executes runtime fixes only through manifest-declared sidecar adapter actions.
 - Supports durable repair planning with path ownership, diff preview, CI verification, rollback, and canary rollout.
 - Shows the full lifecycle in a developer dashboard with an embedded user-facing app preview.
@@ -127,6 +128,9 @@ POST /apps/{app_id}/health-check
 POST /apps/{app_id}/metrics
 GET  /apps/{app_id}/slo-status
 POST /apps/{app_id}/notes
+POST /apps/{app_id}/customizations/plan
+GET  /apps/{app_id}/customizations
+POST /apps/{app_id}/customizations/{proposal_id}/approve
 
 GET  /incidents
 POST /incidents/{incident_id}/analyze

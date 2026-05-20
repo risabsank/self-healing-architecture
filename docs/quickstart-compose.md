@@ -91,7 +91,25 @@ Open `http://localhost:3000`, select `my-compose-app`, and verify:
 - operator notes appear,
 - incidents show trigger source, severity, app, and service.
 
-## 7. Adapt This To Your App
+## 7. Customize Runtime Coverage
+
+Use the dashboard `Customize runtime` panel, or call the API directly, to generate app-specific manifest additions:
+
+```bash
+curl -fsS -X POST http://localhost:8000/apps/my-compose-app/customizations/plan \
+  -H "content-type: application/json" \
+  -d '{"prompt":"Monitor checkout latency and create an incident if p95 exceeds 900ms."}'
+```
+
+Review the returned preview. If it looks correct, approve it:
+
+```bash
+curl -fsS -X POST http://localhost:8000/apps/my-compose-app/customizations/{proposal_id}/approve
+```
+
+The approval updates only manifest-owned reliability configuration such as probes, metrics, SLOs, note templates, dashboard hints, verification probes, and canary probes.
+
+## 8. Adapt This To Your App
 
 For your own app, copy `examples/minimal-compose-app/self-healing.yaml` and update:
 

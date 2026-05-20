@@ -383,6 +383,21 @@ def validate_manifest_readiness(manifest: ApplicationManifest) -> dict[str, Any]
     for slo in manifest.slo_targets:
         add(f"slo:{slo.name}:metric", slo.metric in declared_metrics, f"{slo.name} references a declared metric source.")
 
+    declared_signals = (
+        declared_metrics
+        | {probe.name for probe in [*manifest.health_checks, *manifest.critical_probes]}
+        | {slo.name for slo in manifest.slo_targets}
+        | {group.name for group in manifest.signal_groups}
+    )
+    declared_groups = {group.name for group in manifest.signal_groups}
+    for template in manifest.operator_note_templates:
+        add(f"note_template:{template.name}:service", not template.service_name or template.service_name in services, f"{template.name} references a declared service or no service.")
+        for metric in template.metric_refs:
+            add(f"note_template:{template.name}:metric:{metric}", metric in declared_metrics, f"{template.name} references a declared metric source.")
+    for hint in manifest.dashboard_hints:
+        add(f"dashboard_hint:{hint.name}:signal", not hint.signal_ref or hint.signal_ref in declared_signals, f"{hint.name} references a declared signal.")
+        add(f"dashboard_hint:{hint.name}:group", not hint.group or hint.group in declared_groups, f"{hint.name} references a declared signal group.")
+
     for action in manifest.safe_actions:
         add(f"action:{action.action_type}:service", action.service in services, f"{action.action_type} references a declared service.")
         add(f"action:{action.action_type}:adapter_path", bool(action.adapter_path), f"{action.action_type} has an adapter path.")

@@ -33,6 +33,9 @@ critical_probes: []
 safe_actions: []
 metric_sources: []
 slo_targets: []
+signal_groups: []
+operator_note_templates: []
+dashboard_hints: []
 repair_policy: {}
 verification: {}
 canary: {}
@@ -116,6 +119,38 @@ curl -fsS -X POST http://localhost:8000/apps/my-compose-app/notes \
 
 High-severity notes create incidents. Notes that mention degraded behavior can also trigger incidents.
 
+## Custom Runtime Behavior
+
+Developers can ask the runtime to generate manifest-only reliability support for app-specific behavior. This is useful when a team knows important routes, metrics, or user journeys that are not covered by the default manifest.
+
+```bash
+curl -fsS -X POST http://localhost:8000/apps/my-compose-app/customizations/plan \
+  -H "content-type: application/json" \
+  -d '{"prompt":"Monitor checkout latency and create an incident if p95 exceeds 900ms."}'
+```
+
+The response is a preview. It can add:
+
+- critical probes,
+- metric sources,
+- SLO targets,
+- verification probes,
+- canary probes,
+- signal groups,
+- operator note templates,
+- dashboard hints.
+
+It cannot add arbitrary shell commands, source-code patches, or new sidecar actions. Generated support must validate against the current manifest before it can be approved.
+
+```text
+GET  /apps/{app_id}/customizations
+GET  /apps/{app_id}/customizations/{proposal_id}
+POST /apps/{app_id}/customizations/{proposal_id}/approve
+POST /apps/{app_id}/customizations/{proposal_id}/reject
+```
+
+Approval merges the validated manifest additions into the registered app. Rejection records the decision without changing runtime behavior.
+
 ## Safe Actions
 
 Safe actions define the only runtime mutations the agent can request.
@@ -186,6 +221,10 @@ POST /apps/validate-yaml
 POST /apps/register-yaml
 DELETE /apps/{app_id}
 GET  /apps/{app_id}/validation
+POST /apps/{app_id}/customizations/plan
+GET  /apps/{app_id}/customizations
+POST /apps/{app_id}/customizations/{proposal_id}/approve
+POST /apps/{app_id}/customizations/{proposal_id}/reject
 ```
 
 Use `validate-yaml` before registration so missing services, probes, SLOs, safe actions, or repair policy fields are reported clearly.

@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.db import execute_schema_bootstrap, open_connection
 from app.core.logging import configure_logging, tracing_middleware
 from app.core.security import auth_middleware
+from app.customizations import ensure_customization_schema
 from app.evaluation import ensure_evaluation_schema
 from app.memory import ensure_memory_schema
 from app.monitoring import monitor_loop
@@ -34,6 +35,7 @@ SCHEMA_INITIALIZERS = (
     ensure_cicd_schema,
     ensure_rollout_schema,
     ensure_evaluation_schema,
+    ensure_customization_schema,
 )
 
 
